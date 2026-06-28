@@ -353,6 +353,11 @@ def cleanup_repair_abstracts(
         "--gemini-model",
         help="Gemini model for extraction fallback.",
     ),
+    item_key: list[str] | None = typer.Option(
+        None,
+        "--item-key",
+        help="Limit repair planning/apply to a specific Zotero parent item key. Can be repeated.",
+    ),
 ) -> None:
     """Repair Missing Abstract cleanup items with conservative evidence."""
 
@@ -363,6 +368,7 @@ def cleanup_repair_abstracts(
         enriched_path=enriched_items,
         enable_gemini=enable_gemini,
         gemini_model=gemini_model,
+        item_keys=set(item_key) if item_key else None,
     )
     dump_json_data(output_path, plan)
     write_abstract_repair_report(plan, report_path)
@@ -414,12 +420,27 @@ def cleanup_repair_metadata(
         "--confirm",
         help=f'Required confirmation: "{METADATA_CONFIRMATION}".',
     ),
+    item_key: list[str] | None = typer.Option(
+        None,
+        "--item-key",
+        help="Limit repair planning/apply to a specific Zotero parent item key. Can be repeated.",
+    ),
+    approved_field: list[str] | None = typer.Option(
+        None,
+        "--approved-field",
+        help="Limit metadata writes to approved fields from the repair diff. Can be repeated.",
+    ),
 ) -> None:
     """Repair Missing Metadata cleanup items with field-level diffs."""
 
     if not dry_run and not apply:
         dry_run = True
-    plan = build_metadata_repair_plan(migration_plan, enriched_items)
+    plan = build_metadata_repair_plan(
+        migration_plan,
+        enriched_items,
+        item_keys=set(item_key) if item_key else None,
+        approved_fields=set(approved_field) if approved_field else None,
+    )
     dump_json_data(output_path, plan)
     write_metadata_repair_report(plan, report_path)
     if dry_run:

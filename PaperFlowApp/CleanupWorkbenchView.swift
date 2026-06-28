@@ -135,9 +135,7 @@ struct CleanupWorkbenchView: View {
             state.invalidDropWarnings = ["Select an abstract item first."]
             return
         }
-        state.invalidDropWarnings = [
-            "Backend command missing: selected-only abstract repair is not implemented. Run: uv run paperflow cleanup repair-abstracts --dry-run"
-        ]
+        state.runRepairAbstractDryRun(itemKey: selectedAbstractItemKey)
     }
 
     private func selectedAbstractApply() {
@@ -145,9 +143,7 @@ struct CleanupWorkbenchView: View {
             state.invalidDropWarnings = ["Select an abstract item first."]
             return
         }
-        state.invalidDropWarnings = [
-            "Backend command missing: selected-only abstract apply is not implemented. Full apply command: uv run paperflow cleanup repair-abstracts --apply --confirm \"APPLY ABSTRACT REPAIRS\""
-        ]
+        confirm(.applySelectedAbstractRepair(selectedAbstractItemKey))
     }
 
     private func selectedMetadataRepair() {
@@ -155,9 +151,7 @@ struct CleanupWorkbenchView: View {
             state.invalidDropWarnings = ["Select a metadata item first."]
             return
         }
-        state.invalidDropWarnings = [
-            "Backend command missing: selected-only metadata repair is not implemented. Run: uv run paperflow cleanup repair-metadata --dry-run"
-        ]
+        state.runRepairMetadataDryRun(itemKey: selectedMetadataItemKey)
     }
 
     private func selectedMetadataApply() {
@@ -165,9 +159,11 @@ struct CleanupWorkbenchView: View {
             state.invalidDropWarnings = ["Select a metadata item first."]
             return
         }
-        state.invalidDropWarnings = [
-            "Backend command missing: selected-only field-level metadata apply is not implemented. Full apply command: uv run paperflow cleanup repair-metadata --apply --confirm \"APPLY METADATA REPAIRS\""
-        ]
+        let approvedFields = data.missingMetadata
+            .first { $0.itemKey == selectedMetadataItemKey }?
+            .metadataDiffs
+            .map(\.field) ?? []
+        confirm(.applySelectedMetadataRepair(selectedMetadataItemKey, approvedFields))
     }
 }
 

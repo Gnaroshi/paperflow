@@ -752,11 +752,42 @@ final class AppState: ObservableObject {
         runUV(arguments: args, timeoutSeconds: 1800)
     }
 
+    func runRepairAbstractDryRun(itemKey: String) {
+        let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            invalidDropWarnings = ["Select an abstract item first."]
+            return
+        }
+        var args = ["run", "paperflow", "cleanup", "repair-abstracts", "--dry-run", "--item-key", key]
+        if geminiCleanupEnabled && enableGeminiAbstractExtraction {
+            args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+        }
+        runUV(arguments: args, timeoutSeconds: 1800)
+    }
+
     func runApplyAbstractRepairs() {
         var args = [
             "run", "paperflow", "cleanup", "repair-abstracts",
             "--apply",
             "--confirm", "APPLY ABSTRACT REPAIRS"
+        ]
+        if geminiCleanupEnabled && enableGeminiAbstractExtraction {
+            args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+        }
+        runUV(arguments: args, timeoutSeconds: 3600, destructive: true)
+    }
+
+    func runApplyAbstractRepair(itemKey: String) {
+        let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            invalidDropWarnings = ["Select an abstract item first."]
+            return
+        }
+        var args = [
+            "run", "paperflow", "cleanup", "repair-abstracts",
+            "--apply",
+            "--confirm", "APPLY ABSTRACT REPAIRS",
+            "--item-key", key
         ]
         if geminiCleanupEnabled && enableGeminiAbstractExtraction {
             args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
@@ -771,6 +802,18 @@ final class AppState: ObservableObject {
         )
     }
 
+    func runRepairMetadataDryRun(itemKey: String) {
+        let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            invalidDropWarnings = ["Select a metadata item first."]
+            return
+        }
+        runUV(
+            arguments: ["run", "paperflow", "cleanup", "repair-metadata", "--dry-run", "--item-key", key],
+            timeoutSeconds: 1800
+        )
+    }
+
     func runApplyMetadataRepairs() {
         runUV(
             arguments: [
@@ -781,6 +824,24 @@ final class AppState: ObservableObject {
             timeoutSeconds: 3600,
             destructive: true
         )
+    }
+
+    func runApplyMetadataRepair(itemKey: String, approvedFields: [String]) {
+        let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            invalidDropWarnings = ["Select a metadata item first."]
+            return
+        }
+        var args = [
+            "run", "paperflow", "cleanup", "repair-metadata",
+            "--apply",
+            "--confirm", "APPLY METADATA REPAIRS",
+            "--item-key", key
+        ]
+        for field in approvedFields {
+            args += ["--approved-field", field]
+        }
+        runUV(arguments: args, timeoutSeconds: 3600, destructive: true)
     }
 
     func runPlanDuplicateResolution() {

@@ -116,6 +116,10 @@ struct MainWindowView: View {
             state.runApplyAbstractRepairs()
         case .applyMetadataRepairs:
             state.runApplyMetadataRepairs()
+        case .applySelectedAbstractRepair(let itemKey):
+            state.runApplyAbstractRepair(itemKey: itemKey)
+        case .applySelectedMetadataRepair(let itemKey, let approvedFields):
+            state.runApplyMetadataRepair(itemKey: itemKey, approvedFields: approvedFields)
         }
     }
 }

@@ -174,9 +174,12 @@ def build_abstract_repair_plan(
     enriched_path: Path = Path("data/zotero_items_enriched.jsonl"),
     enable_gemini: bool = False,
     gemini_model: str = "gemini-2.5-flash",
+    item_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     plan, enriched = load_workbench_inputs(migration_plan_path, enriched_path)
     target_keys = cleanup_item_keys(plan, MISSING_ABSTRACT_COLLECTION, "cleanup/missing-abstract")
+    if item_keys is not None:
+        target_keys &= item_keys
     repairs: list[dict[str, Any]] = []
     gemini = GeminiClient(model=gemini_model) if enable_gemini else None
     try:
@@ -315,9 +318,13 @@ def apply_abstract_repairs(
 def build_metadata_repair_plan(
     migration_plan_path: Path = Path("data/migration_plan.json"),
     enriched_path: Path = Path("data/zotero_items_enriched.jsonl"),
+    item_keys: set[str] | None = None,
+    approved_fields: set[str] | None = None,
 ) -> dict[str, Any]:
     plan, enriched = load_workbench_inputs(migration_plan_path, enriched_path)
     target_keys = cleanup_item_keys(plan, MISSING_METADATA_COLLECTION, "cleanup/missing-metadata")
+    if item_keys is not None:
+        target_keys &= item_keys
     repairs: list[dict[str, Any]] = []
     for item_key in sorted(target_keys):
         item = enriched.get(item_key)
@@ -344,12 +351,14 @@ def build_metadata_repair_plan(
             }
         if crossref.get("abstract") and not item.abstract_note:
             updates["abstract"] = {"before": item.abstract_note, "after": crossref["abstract"]}
+        if approved_fields is not None:
+            updates = {field: diff for field, diff in updates.items() if field in approved_fields}
         repairs.append(
             {
                 "item_key": item.key,
                 "title": item.title,
                 "updates": updates,
-                "approved_fields": list(updates),
+                "approved_fields": sorted(updates),
                 "safe_to_apply": bool(updates),
             }
         )

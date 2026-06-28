@@ -6,6 +6,7 @@ import httpx
 from paperflow.cleanup_workbench import (
     abstract_text_is_verbatim,
     build_abstract_repair_plan,
+    build_metadata_repair_plan,
     duplicate_resolution_plan,
     explain_item,
     extract_abstract_from_text,
@@ -156,6 +157,88 @@ def test_existing_abstract_resolves_missing_abstract(tmp_path: Path) -> None:
 
     assert plan["repairs"][0]["found"] is True
     assert plan["repairs"][0]["evidence_source"] == "zotero"
+
+
+def test_abstract_repair_can_target_selected_item(tmp_path: Path) -> None:
+    migration_path = tmp_path / "migration.json"
+    enriched_path = tmp_path / "items.jsonl"
+    write_json(migration_path, _migration_plan([_migration_item("ITEM1"), _migration_item("ITEM2")]))
+    write_jsonl(
+        enriched_path,
+        [
+            EnrichedZoteroItem(
+                key="ITEM1",
+                itemType="journalArticle",
+                title="First Paper",
+                abstractNote="This is already a real abstract for the first paper.",
+                normalized_title="first paper",
+                metadata_quality_score=0.7,
+            ),
+            EnrichedZoteroItem(
+                key="ITEM2",
+                itemType="journalArticle",
+                title="Second Paper",
+                abstractNote="This is already a real abstract for the second paper.",
+                normalized_title="second paper",
+                metadata_quality_score=0.7,
+            ),
+        ],
+    )
+
+    plan = build_abstract_repair_plan(migration_path, enriched_path, item_keys={"ITEM2"})
+
+    assert [row["item_key"] for row in plan["repairs"]] == ["ITEM2"]
+
+
+def test_metadata_repair_can_target_item_and_approved_fields(tmp_path: Path, monkeypatch) -> None:
+    migration_path = tmp_path / "migration.json"
+    enriched_path = tmp_path / "items.jsonl"
+    write_json(
+        migration_path,
+        _migration_plan(
+            [
+                _migration_item(
+                    "META1",
+                    tags=["status/to-read", "type/method", "cleanup/missing-metadata"],
+                    collections=["AI Library/40 Cleanup/Missing Metadata"],
+                )
+            ]
+        ),
+    )
+    write_jsonl(
+        enriched_path,
+        [
+            EnrichedZoteroItem(
+                key="META1",
+                itemType="journalArticle",
+                title="Metadata Paper",
+                doi="10.1234/example",
+                doi_normalized="10.1234/example",
+                normalized_title="metadata paper",
+                metadata_quality_score=0.3,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "paperflow.cleanup_workbench.fetch_crossref_metadata",
+        lambda doi: {
+            "url": "https://example.org/paper",
+            "year": 2024,
+            "publication_title": "Journal",
+            "abstract": "A repaired abstract.",
+        },
+    )
+
+    plan = build_metadata_repair_plan(
+        migration_path,
+        enriched_path,
+        item_keys={"META1"},
+        approved_fields={"url"},
+    )
+
+    assert [row["item_key"] for row in plan["repairs"]] == ["META1"]
+    assert list(plan["repairs"][0]["updates"]) == ["url"]
+    assert plan["repairs"][0]["approved_fields"] == ["url"]
 
 
 def test_pdf_abstract_section_is_extracted() -> None:

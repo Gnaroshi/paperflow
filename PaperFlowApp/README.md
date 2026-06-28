@@ -97,8 +97,9 @@ uv run paperflow zotero migration-audit
 - Existing Attachments: workflows for localizing stored Zotero PDFs.
 - Cleanup Workbench: Missing Abstract, Missing Metadata, Duplicate Candidates,
   Low Confidence, and Non-paper review surfaces. It reads local plans/reports
-  and calls backend cleanup commands; selected-only and per-field writes are
-  shown as backend-missing until implemented.
+  and calls backend cleanup commands. Missing Abstract and Missing Metadata
+  support selected-item dry runs and selected-item applies through backend
+  `--item-key`; metadata repair can constrain writes with `--approved-field`.
 - Reports: opens migration, preview, cleanup, dedupe, localization, and apply
   log reports.
 - Settings: paths, hot-zone preferences, shortcuts, Zotero credentials, Gemini

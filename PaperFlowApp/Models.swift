@@ -245,8 +245,19 @@ enum ConfirmationKind: Identifiable {
     case cleanupStoredAttachments
     case applyAbstractRepairs
     case applyMetadataRepairs
+    case applySelectedAbstractRepair(String)
+    case applySelectedMetadataRepair(String, [String])
 
-    var id: String { title }
+    var id: String {
+        switch self {
+        case .applySelectedAbstractRepair(let itemKey):
+            return "\(title)-\(itemKey)"
+        case .applySelectedMetadataRepair(let itemKey, let fields):
+            return "\(title)-\(itemKey)-\(fields.joined(separator: ","))"
+        default:
+            return title
+        }
+    }
 
     var title: String {
         switch self {
@@ -264,6 +275,10 @@ enum ConfirmationKind: Identifiable {
             return "Apply Abstract Repairs"
         case .applyMetadataRepairs:
             return "Apply Metadata Repairs"
+        case .applySelectedAbstractRepair(let itemKey):
+            return "Apply Abstract Repair: \(itemKey)"
+        case .applySelectedMetadataRepair(let itemKey, _):
+            return "Apply Metadata Repair: \(itemKey)"
         }
     }
 
@@ -281,8 +296,10 @@ enum ConfirmationKind: Identifiable {
             return "DELETE OLD STORED PDF ATTACHMENTS"
         case .applyAbstractRepairs:
             return "APPLY ABSTRACT REPAIRS"
-        case .applyMetadataRepairs:
+        case .applyMetadataRepairs, .applySelectedMetadataRepair:
             return "APPLY METADATA REPAIRS"
+        case .applySelectedAbstractRepair:
+            return "APPLY ABSTRACT REPAIRS"
         }
     }
 
@@ -302,6 +319,11 @@ enum ConfirmationKind: Identifiable {
             return "This updates Zotero abstractNote only for high-confidence repairs and should not overwrite existing abstracts unless backend options explicitly allow it."
         case .applyMetadataRepairs:
             return "This updates Zotero metadata fields from reviewed repair proposals. It must not replace stronger metadata with weaker metadata."
+        case .applySelectedAbstractRepair(let itemKey):
+            return "This updates Zotero abstractNote for item \(itemKey) only if the repair is high-confidence."
+        case .applySelectedMetadataRepair(let itemKey, let fields):
+            let fieldList = fields.isEmpty ? "the selected repair fields" : fields.joined(separator: ", ")
+            return "This updates \(fieldList) for Zotero item \(itemKey) only."
         }
     }
 }
