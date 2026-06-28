@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from enum import StrEnum
@@ -59,8 +60,11 @@ from paperflow.ingest import (
     ProgressEmitter,
     StorageMode,
     apply_ingest_plan,
+    build_ingest_apply_log,
     build_ingest_debug_trace,
     build_ingest_plan,
+    explain_ingest_plan,
+    timestamped_ingest_apply_log_path,
     validate_ingest_request,
     write_ingest_report,
 )
@@ -360,15 +364,16 @@ def ingest(
     if time.monotonic() - started_at > total_timeout_seconds:
         console.print("[bold red]Ingest exceeded total timeout before writing report.[/bold red]")
         raise typer.Exit(124)
-    dump_json_data(json_output, plan)
-    with progress.stage(
-        "write_dry_run_report",
-        f"Writing ingest dry-run report to {report_path}",
-        file_path=None,
-        file_index=None,
-        total_files=len(pdf_paths),
-    ):
-        write_ingest_report(plan, report_path, applied=False)
+    if dry_run:
+        dump_json_data(json_output, plan)
+        with progress.stage(
+            "write_dry_run_report",
+            f"Writing ingest dry-run report to {report_path}",
+            file_path=None,
+            file_index=None,
+            total_files=len(pdf_paths),
+        ):
+            write_ingest_report(plan, report_path, applied=False)
     if debug_trace:
         trace = build_ingest_debug_trace(
             plan,
@@ -411,12 +416,22 @@ def ingest(
         console.print(BRIDGE_NOTE)
         console.print(f"HTTP status: {exc.response.status_code}; response: {exc.response.text}")
         raise typer.Exit(2)
-    dump_json_data(json_output.with_name("ingest_apply_log.json"), {"events": events})
+    apply_log_path = timestamped_ingest_apply_log_path(json_output.parent)
+    dump_json_data(apply_log_path, build_ingest_apply_log(plan, events))
     write_ingest_report(plan, report_path, applied=True)
-    console.print(
-        f"Applied linked-local ingest for {len(plan['items'])} PDFs. "
-        "No PDF bytes were uploaded to Zotero Storage."
+    progress.emit(
+        "done",
+        "done",
+        f"Applied linked-local ingest for {len(plan['items'])} PDFs. No PDF bytes were uploaded to Zotero Storage.",
+        file_path=None,
+        file_index=None,
+        total_files=len(pdf_paths),
     )
+    if not progress_jsonl:
+        console.print(
+            f"Applied linked-local ingest for {len(plan['items'])} PDFs. "
+            f"No PDF bytes were uploaded to Zotero Storage. Apply log: {apply_log_path}."
+        )
 
 
 @cleanup_app.command("repair-abstracts")
@@ -1463,6 +1478,26 @@ def migration_audit_command(
     dump_json_data(json_output, audit)
     write_migration_audit_report(audit, markdown_output)
     console.print(f"Wrote migration audit to {json_output} and {markdown_output}.")
+
+
+@zotero_app.command("explain-ingest")
+def explain_ingest_command(
+    plan_path: Path = typer.Argument(
+        ...,
+        help="Ingest plan or apply log JSON file.",
+    ),
+) -> None:
+    """Explain where an ingest dry-run/apply would put papers."""
+
+    if not plan_path.exists():
+        console.print(f"[bold red]Ingest JSON not found: {plan_path}[/bold red]")
+        raise typer.Exit(2)
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[bold red]Could not read ingest JSON: {exc}[/bold red]")
+        raise typer.Exit(2)
+    console.print(explain_ingest_plan(payload))
 
 
 @zotero_app.command("rollback")

@@ -603,11 +603,14 @@ struct DropShelfView: View {
                         Text(row.title)
                             .font(.caption)
                             .fontWeight(.semibold)
+                        Text(row.mode == "apply" ? "Applied" : "Planned destination")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text("Source file: \(row.sourceFile)")
                             .font(.caption)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text("Planned vault path: \(row.targetPath)")
+                        Text("\(row.mode == "apply" ? "Linked PDF path" : "Planned vault path"): \(row.finalLinkedPDFPath ?? row.targetPath)")
                             .font(.caption)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -629,6 +632,14 @@ struct DropShelfView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        if let openURI = row.zoteroOpenURI, row.mode == "apply" {
+                            Button("Open in Zotero") {
+                                if let url = URL(string: openURI) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .font(.caption)
+                        }
                     }
                     .padding(10)
                     .background(Color.white.opacity(0.38))
@@ -648,32 +659,67 @@ struct DropShelfView: View {
         let tags: [String]
         let zoteroOperation: String?
         let zoteroItemKey: String?
+        let zoteroOpenURI: String?
+        let finalLinkedPDFPath: String?
+        let mode: String
     }
 
     private func latestIngestRows() -> [IngestSummaryRow] {
-        let url = state.dataURL.appendingPathComponent("ingest_plan.json")
+        let url = latestStructuredIngestURL()
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let items = json["items"] as? [[String: Any]] else {
             return []
         }
+        let mode = json["mode"] as? String ?? "dry-run"
         return items.compactMap { item in
             guard let target = (item["planned_vault_path"] as? String) ?? (item["target_path"] as? String) else {
                 return nil
             }
             let zotero = item["zotero"] as? [String: Any]
+            let finalCollections = item["final_collections"] as? [String]
+            let finalTags = item["final_tags"] as? [String]
             return IngestSummaryRow(
                 sourceFile: (item["source_file"] as? String) ?? (item["source_path"] as? String) ?? "unknown",
                 title: item["title"] as? String ?? URL(fileURLWithPath: target).deletingPathExtension().lastPathComponent,
                 targetPath: target,
                 storageMode: item["storage_mode"] as? String ?? "linked-local",
                 uploadToZoteroStorage: item["upload_to_zotero_storage"] as? Bool ?? false,
-                collections: (item["planned_collections"] as? [String]) ?? (item["target_collections"] as? [String]) ?? [],
-                tags: (item["planned_tags"] as? [String]) ?? (item["normalized_tags"] as? [String]) ?? [],
+                collections: finalCollections ?? (item["planned_collections"] as? [String]) ?? (item["target_collections"] as? [String]) ?? [],
+                tags: finalTags ?? (item["planned_tags"] as? [String]) ?? (item["normalized_tags"] as? [String]) ?? [],
                 zoteroOperation: (zotero?["operation"] as? String) ?? (item["zotero_action"] as? String),
-                zoteroItemKey: zotero?["item_key"] as? String
+                zoteroItemKey: zotero?["item_key"] as? String,
+                zoteroOpenURI: zotero?["open_uri"] as? String,
+                finalLinkedPDFPath: item["final_linked_pdf_path"] as? String,
+                mode: mode
             )
         }
+    }
+
+    private func latestStructuredIngestURL() -> URL {
+        let planURL = state.dataURL.appendingPathComponent("ingest_plan.json")
+        guard state.runner.currentCommand.contains("--apply"),
+              let latestApply = latestApplyLogURL() else {
+            return planURL
+        }
+        return latestApply
+    }
+
+    private func latestApplyLogURL() -> URL? {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: state.dataURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else {
+            return nil
+        }
+        return files
+            .filter { $0.lastPathComponent.hasPrefix("ingest_apply_log_") && $0.pathExtension == "json" }
+            .sorted { lhs, rhs in
+                let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return left > right
+            }
+            .first
     }
 
     private var elapsedResultLabel: String {

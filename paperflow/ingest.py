@@ -24,6 +24,7 @@ from paperflow.metadata import (
     arxiv_id_from_extra,
     arxiv_id_from_url,
 )
+from paperflow.migration_apply import collection_maps, creation_plan
 from paperflow.taxonomy_v2 import normalize_doi
 from paperflow.utils import ensure_parent_dir
 from paperflow.vault import (
@@ -266,6 +267,50 @@ def _abstract_from_first_page(text: str) -> str | None:
         return None
     abstract = re.sub(r"\s+", " ", match.group("body")).strip()
     return abstract if len(abstract) >= 80 else None
+
+
+def _collapse_home(path: Path) -> str:
+    expanded = str(path.expanduser())
+    home = str(Path.home())
+    if expanded == home:
+        return "~"
+    if expanded.startswith(f"{home}/"):
+        return f"~/{expanded[len(home) + 1:]}"
+    return expanded
+
+
+def _authors_from_metadata(value: object) -> list[str]:
+    if not value:
+        return []
+    return [
+        author.strip()
+        for author in re.split(r"\s*(?:;|,|\band\b)\s*", str(value))
+        if author.strip()
+    ][:20]
+
+
+def ingest_actions(executed: bool = False) -> list[dict[str, Any]]:
+    return [
+        {"name": "copy_to_vault", "executed": executed},
+        {"name": "create_or_update_zotero_item", "executed": executed},
+        {"name": "create_linked_attachment", "executed": executed},
+        {"name": "add_to_collections", "executed": executed},
+        {"name": "add_tags", "executed": executed},
+    ]
+
+
+def _set_action(
+    item: dict[str, Any],
+    name: str,
+    executed: bool,
+    **extra: Any,
+) -> None:
+    for action in item.setdefault("actions", ingest_actions()):
+        if action.get("name") == name:
+            action["executed"] = executed
+            action.update(extra)
+            return
+    item["actions"].append({"name": name, "executed": executed, **extra})
 
 
 def arxiv_id_from_filename_preserve_version(value: str | None) -> str | None:
@@ -525,11 +570,22 @@ def extract_pdf_metadata(
         or extract_year(combined)
     )
     abstract = arxiv_metadata.get("abstract") or doi_metadata.get("abstract") or first_page_abstract
-    metadata_source = (
-        arxiv_metadata.get("metadata_source")
-        or doi_metadata.get("metadata_source")
-        or ("pdf_first_page" if first_page_title or first_page_abstract else "filename")
-    )
+    if arxiv_metadata.get("abstract"):
+        abstract_source = "arxiv"
+    elif doi_metadata.get("abstract"):
+        abstract_source = "doi"
+    elif first_page_abstract:
+        abstract_source = "pdf_first_page"
+    else:
+        abstract_source = None
+    metadata_sources = ["filename"]
+    if first_page_title or first_page_abstract:
+        metadata_sources.append("pdf_first_page")
+    if arxiv_metadata.get("metadata_source"):
+        metadata_sources.append("arxiv")
+    if doi_metadata.get("metadata_source"):
+        metadata_sources.append("doi")
+    metadata_source = "+".join(dict.fromkeys(metadata_sources))
     identifier = arxiv_id or doi or sha256_file(path)[:12]
     metadata.update(
         {
@@ -541,6 +597,7 @@ def extract_pdf_metadata(
             "display_identifier": f"arXiv {arxiv_id}" if arxiv_id else (doi or identifier),
             "abstract": abstract,
             "abstract_found": bool(abstract),
+            "abstract_source": abstract_source,
             "metadata_source": metadata_source,
             "first_page_text": first_page,
             "first_page_sha256": sha256_first_mb(path),
@@ -709,24 +766,33 @@ def build_ingest_plan(
             planned_zotero_operation = "create"
         title = metadata.get("title") or source.stem
         abstract_found = bool(metadata.get("abstract_found"))
+        planned_filename = target.name
+        rationale = "; ".join(classification_reasons) if classification_reasons else "No strong ingest taxonomy signal."
+        classification_confidence = 0.35 if target_collections == ["AI Library/00 Inbox"] else 0.82
         items.append(
             {
                 "source_path": str(source),
                 "source_file": str(source),
                 "source_exists": exists,
+                "file_exists": exists,
                 "source_size": source_size,
+                "file_size_bytes": source_size,
                 "source_sha256": sha256_file(source) if exists else None,
                 "first_mb_sha256": metadata.get("first_page_sha256"),
                 "target_path": str(target),
-                "planned_vault_path": str(target),
+                "planned_filename": planned_filename,
+                "planned_vault_path": _collapse_home(target),
                 "title": title,
+                "authors": _authors_from_metadata(metadata.get("author")),
                 "year": metadata.get("year"),
                 "doi_normalized": metadata.get("doi_normalized"),
+                "doi": metadata.get("doi_normalized"),
                 "arxiv_id": metadata.get("arxiv_id"),
                 "identifier": metadata.get("identifier") or source.stem,
                 "display_identifier": metadata.get("display_identifier") or metadata.get("identifier") or source.stem,
                 "abstract_found": abstract_found,
                 "abstract_present": abstract_found,
+                "abstract_source": metadata.get("abstract_source"),
                 "metadata_source": metadata.get("metadata_source"),
                 "pdf_page_count": metadata.get("page_count"),
                 "target_collections": target_collections,
@@ -734,6 +800,10 @@ def build_ingest_plan(
                 "normalized_tags": normalized_tags,
                 "planned_tags": normalized_tags,
                 "classification_reasons": classification_reasons,
+                "classification": {
+                    "confidence": classification_confidence,
+                    "rationale": rationale,
+                },
                 "gemini_enabled": False,
                 "network_enabled": network_enabled,
                 "zotero_write_enabled": False,
@@ -744,12 +814,16 @@ def build_ingest_plan(
                     "operation": planned_zotero_operation,
                     "item_key": None,
                     "open_uri": None,
+                    "write_executed": False,
                 },
+                "actions": ingest_actions(executed=False),
             }
         )
     return {
         "schema_version": "1.0",
         "mode": "dry-run",
+        "storage_mode": StorageMode.LINKED_LOCAL.value,
+        "upload_to_zotero_storage": False,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "vault_library": str(vault_library.expanduser()),
         "items": items,
@@ -894,10 +968,11 @@ def _created_key(response_json: dict[str, Any], index: int = 0) -> str:
 
 
 def _parent_body(plan_item: dict[str, Any]) -> dict[str, Any]:
+    tags = plan_item.get("planned_tags") or plan_item.get("normalized_tags") or []
     body: dict[str, Any] = {
         "itemType": "journalArticle",
         "title": plan_item["title"],
-        "tags": [{"tag": "source/arxiv"}] if plan_item.get("arxiv_id") else [],
+        "tags": [{"tag": tag} for tag in tags],
     }
     if plan_item.get("doi_normalized"):
         body["DOI"] = plan_item["doi_normalized"]
@@ -906,6 +981,39 @@ def _parent_body(plan_item: dict[str, Any]) -> dict[str, Any]:
     if plan_item.get("arxiv_id"):
         body["url"] = f"https://arxiv.org/abs/{plan_item['arxiv_id']}"
     return body
+
+
+def _ensure_ingest_collections(
+    client: ZoteroWebClient,
+    target_paths: list[str],
+) -> dict[str, str]:
+    collections = client.iter_collections()
+    key_by_path, _, _ = collection_maps(collections)
+    for collection in creation_plan(target_paths, collections):
+        parent_path = collection["parentPath"]
+        parent_key = key_by_path.get(parent_path) if parent_path else False
+        response = client.post_collections(
+            [{"name": collection["name"], "parentCollection": parent_key}]
+        )
+        response.raise_for_status()
+        collections = client.iter_collections()
+        key_by_path, _, _ = collection_maps(collections)
+    return key_by_path
+
+
+def _collection_keys_for_item(
+    plan_item: dict[str, Any],
+    key_by_path: dict[str, str],
+) -> list[str]:
+    return [
+        key_by_path[path]
+        for path in (plan_item.get("planned_collections") or plan_item.get("target_collections") or [])
+        if path in key_by_path
+    ]
+
+
+def _zotero_open_uri(item_key: str) -> str:
+    return f"zotero://select/library/items/{item_key}"
 
 
 def linked_attachment_body(
@@ -933,10 +1041,36 @@ def apply_ingest_plan(
     events: list[dict[str, Any]] = []
     vault_library = Path(plan["vault_library"]).expanduser()
     with ZoteroWebClient(user_id=user_id, api_key=api_key) as client:
+        collection_paths = list(
+            dict.fromkeys(
+                path
+                for item in plan["items"]
+                for path in (item.get("planned_collections") or item.get("target_collections") or [])
+            )
+        )
+        key_by_path = _ensure_ingest_collections(client, collection_paths)
         for item in plan["items"]:
+            item.setdefault(
+                "zotero",
+                {
+                    "operation": "create",
+                    "item_key": None,
+                    "open_uri": None,
+                    "write_executed": False,
+                },
+            )
+            item.setdefault("actions", ingest_actions(executed=False))
             source = Path(item["source_path"])
             target = Path(item["target_path"])
             checksum = copy_pdf_to_vault(source, target, item.get("source_sha256"))
+            _set_action(
+                item,
+                "copy_to_vault",
+                True,
+                source_file=str(source),
+                linked_pdf_path=str(target),
+                sha256=checksum,
+            )
             events.append(
                 {
                     "event": "pdf-copied-to-vault",
@@ -947,10 +1081,27 @@ def apply_ingest_plan(
             )
 
             parent_key = _find_existing_parent(client, item)
+            parent_existed = bool(parent_key)
+            collection_keys = _collection_keys_for_item(item, key_by_path)
+            item_body = _parent_body(item)
+            item_body["collections"] = collection_keys
             if parent_key:
-                events.append({"event": "parent-item-found", "itemKey": parent_key})
+                response = client.patch_item(
+                    parent_key,
+                    {
+                        "collections": collection_keys,
+                        "tags": item_body["tags"],
+                    },
+                )
+                events.append(
+                    {
+                        "event": "parent-item-updated",
+                        "itemKey": parent_key,
+                        "statusCode": response.status_code,
+                    }
+                )
             else:
-                response = client.post_items([_parent_body(item)])
+                response = client.post_items([item_body])
                 parent_key = _created_key(response.json())
                 events.append(
                     {
@@ -959,6 +1110,38 @@ def apply_ingest_plan(
                         "statusCode": response.status_code,
                     }
                 )
+            item["zotero"].update(
+                {
+                    "operation": "update" if parent_existed else "create",
+                    "item_key": parent_key,
+                    "open_uri": _zotero_open_uri(parent_key),
+                    "write_executed": True,
+                }
+            )
+            item["zotero_write_enabled"] = True
+            item["final_collections"] = item.get("planned_collections") or item.get("target_collections") or []
+            item["final_collection_keys"] = collection_keys
+            item["final_tags"] = item.get("planned_tags") or item.get("normalized_tags") or []
+            item["final_linked_pdf_path"] = str(target)
+            _set_action(
+                item,
+                "create_or_update_zotero_item",
+                True,
+                item_key=parent_key,
+            )
+            _set_action(
+                item,
+                "add_to_collections",
+                True,
+                collection_keys=collection_keys,
+                collection_names=item.get("planned_collections") or item.get("target_collections") or [],
+            )
+            _set_action(
+                item,
+                "add_tags",
+                True,
+                tags=item.get("planned_tags") or item.get("normalized_tags") or [],
+            )
 
             response = client.post_items(
                 [
@@ -971,6 +1154,14 @@ def apply_ingest_plan(
                 ]
             )
             attachment_key = _created_key(response.json())
+            _set_action(
+                item,
+                "create_linked_attachment",
+                True,
+                parent_item_key=parent_key,
+                attachment_key=attachment_key,
+                linked_pdf_path=str(target),
+            )
             events.append(
                 {
                     "event": "linked-attachment-created",
@@ -981,3 +1172,55 @@ def apply_ingest_plan(
                 }
             )
     return events
+
+
+def build_ingest_apply_log(plan: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "apply",
+        "storage_mode": StorageMode.LINKED_LOCAL.value,
+        "upload_to_zotero_storage": False,
+        "items": plan.get("items", []),
+        "events": events,
+    }
+
+
+def timestamped_ingest_apply_log_path(data_dir: Path = Path("data")) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return data_dir / f"ingest_apply_log_{timestamp}.json"
+
+
+def explain_ingest_plan(plan: dict[str, Any]) -> str:
+    mode = plan.get("mode", "dry-run")
+    lines = [
+        "# ingest explanation",
+        "",
+        f"- Mode: {mode}",
+        f"- Storage mode: {plan.get('storage_mode', StorageMode.LINKED_LOCAL.value)}",
+        f"- Upload to Zotero Storage: {str(plan.get('upload_to_zotero_storage', False)).lower()}",
+        "",
+    ]
+    for index, item in enumerate(plan.get("items", []), start=1):
+        zotero = item.get("zotero") or {}
+        lines.extend(
+            [
+                f"## {index}. {item.get('title') or Path(str(item.get('source_file', 'paper'))).stem}",
+                "",
+                f"- Source: {item.get('source_file') or item.get('source_path')}",
+                f"- Planned vault path: {item.get('planned_vault_path') or item.get('target_path')}",
+                f"- Planned Zotero collections: {', '.join(item.get('planned_collections') or item.get('target_collections') or []) or 'none'}",
+                f"- Planned tags: {', '.join(item.get('planned_tags') or item.get('normalized_tags') or []) or 'none'}",
+                f"- Zotero operation: {zotero.get('operation') or item.get('zotero_action') or 'none'}",
+                f"- Zotero write executed: {str(bool(zotero.get('write_executed'))).lower()}",
+                "",
+            ]
+        )
+        if zotero.get("item_key"):
+            lines.append(f"- Zotero item key: {zotero['item_key']}")
+        if item.get("final_linked_pdf_path"):
+            lines.append(f"- Final linked PDF path: {item['final_linked_pdf_path']}")
+        if item.get("errors"):
+            lines.append(f"- Errors: {item['errors']}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"

@@ -115,13 +115,21 @@ def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeyp
     item = plan["items"][0]
     assert plan["schema_version"] == "1.0"
     assert plan["mode"] == "dry-run"
+    assert plan["storage_mode"] == "linked-local"
+    assert plan["upload_to_zotero_storage"] is False
+    assert item["source_file"] == str(pdf)
+    assert item["file_exists"] is True
+    assert item["file_size_bytes"] == pdf.stat().st_size
     assert item["arxiv_id"] == "2606.18208v1"
     assert item["title"] == "Looped World Models"
+    assert item["authors"] == []
     assert item["year"] == 2026
     assert item["abstract_found"] is True
     assert item["abstract_present"] is True
-    assert item["metadata_source"] == "pdf_first_page"
+    assert item["abstract_source"] == "pdf_first_page"
+    assert item["metadata_source"] == "filename+pdf_first_page"
     assert Path(item["target_path"]).name == "2026 - Looped World Models [arXiv 2606.18208v1].pdf"
+    assert item["planned_filename"] == "2026 - Looped World Models [arXiv 2606.18208v1].pdf"
     assert Path(item["planned_vault_path"]).name == "2026 - Looped World Models [arXiv 2606.18208v1].pdf"
     assert item["zotero_write_enabled"] is False
     assert item["storage_mode"] == "linked-local"
@@ -140,4 +148,36 @@ def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeyp
     assert "source/arxiv" in item["normalized_tags"]
     assert "method/efficient-compute" in item["planned_tags"]
     assert "source/arxiv" in item["planned_tags"]
+    assert item["classification"]["confidence"] > 0
+    assert "world model" in item["classification"]["rationale"]
+    assert item["actions"] == [
+        {"name": "copy_to_vault", "executed": False},
+        {"name": "create_or_update_zotero_item", "executed": False},
+        {"name": "create_linked_attachment", "executed": False},
+        {"name": "add_to_collections", "executed": False},
+        {"name": "add_tags", "executed": False},
+    ]
     assert any(event["event"] == "stage_started" for event in events)
+
+
+def test_explain_ingest_command_reads_structured_json(tmp_path: Path, monkeypatch) -> None:
+    pdf = _fake_pdf(tmp_path)
+    monkeypatch.setattr("paperflow.ingest._first_page_text", lambda path: LOOPED_WORLD_MODELS_FIRST_PAGE)
+    plan = build_ingest_plan(
+        [pdf],
+        vault_library=tmp_path / "Library",
+        network_enabled=False,
+        cache_dir=tmp_path / "cache",
+    )
+    plan_path = tmp_path / "ingest_plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["zotero", "explain-ingest", str(plan_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "Source:" in result.output
+    assert "Planned vault path:" in result.output
+    assert "AI Library/20 Areas/World Models & Embodied AI" in result.output
+    assert "status/to-read" in result.output
+    assert "Zotero write executed: false" in result.output
