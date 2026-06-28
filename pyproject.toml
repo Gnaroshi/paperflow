@@ -1,0 +1,31 @@
+[project]
+name = "paperflow"
+version = "0.1.0"
+description = "CLI tools for planning a safe Zotero AI paper reorganization."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.5.0",
+    "pypdf>=4.0.0",
+    "rapidfuzz>=3.6.0",
+    "rich>=13.0.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+paperflow = "paperflow.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

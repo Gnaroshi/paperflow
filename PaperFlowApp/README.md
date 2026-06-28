@@ -1,0 +1,174 @@
+# PaperFlow macOS App
+
+PaperFlow is a local-first macOS utility for the existing `paperflow` Python
+CLI. The primary UI is a persistent floating PDF drop shelf with screen-edge
+hot-zones, plus a Raycast-style command window and a full control-panel window.
+The app does not classify papers or rewrite Zotero logic in Swift. It passes
+commands and paths to the CLI, parses local reports, and keeps apply operations
+behind typed confirmations.
+
+## Local-first Zotero model
+
+- Zotero keeps metadata, collections, tags, notes, and annotations.
+- PDFs should live in the local PaperFlow vault by default.
+- PDF upload to Zotero Storage is not a default workflow.
+- Existing notes, highlights, underlines, annotations, and child notes must not
+  be deleted automatically.
+- Data sync and file sync are separate in Zotero.
+- For local-only PDFs, Zotero file sync should be off to avoid the 300 MB free
+  storage limit.
+- When PaperFlow writes through the Zotero Web API, Zotero Desktop needs data
+  sync enabled or a manual sync to show the changes.
+
+## Build
+
+From this directory:
+
+```bash
+swift build -c release
+./build_app.sh
+open dist/PaperFlow.app
+```
+
+This project is a Swift Package that bundles into a small `.app` for local
+development. Developer ID signing and notarization can be added later without
+blocking local builds.
+
+## Set Up
+
+Open PaperFlow from `dist/PaperFlow.app`. The menu bar item is only for
+status/settings/actions; it is not the PDF drop surface. Use Settings for:
+
+- `PaperFlow project directory`: the folder containing `pyproject.toml`
+- `uv path`: usually `/opt/homebrew/bin/uv`, `/usr/local/bin/uv`, or
+  `~/.local/bin/uv`
+- `local vault path`: default `~/Papers/Paperflow/Library`
+- Zotero API key: stored in macOS Keychain and redacted in logs
+- Numeric Zotero user ID: fetch from the Zotero API key; email addresses and
+  usernames do not work for Zotero Web API write URLs
+- Gemini API key and model: optional, stored in Keychain, used only for
+  explicitly enabled cleanup assistance
+
+The app sets a broad `PATH` before running commands so Finder, Spotlight, and
+Login Items launches behave like a shell launch.
+
+## Install uv
+
+```bash
+brew install uv
+uv --version
+```
+
+## Manual CLI Commands
+
+From the paperflow project directory:
+
+```bash
+uv run paperflow zotero backup
+uv run paperflow zotero enrich-metadata
+uv run paperflow zotero detect-duplicates
+uv run paperflow zotero plan-migration
+uv run paperflow zotero dry-run-migration
+uv run paperflow zotero apply-migration --collection-mode replace-all --tag-mode replace-managed --apply --confirm "REPLACE MY ZOTERO COLLECTIONS"
+uv run paperflow zotero cleanup-collections --mode report-only
+uv run paperflow vault init
+uv run paperflow vault plan-paths
+uv run paperflow zotero plan-localize-attachments
+uv run paperflow zotero apply-localize-attachments --apply --confirm "LOCALIZE ZOTERO PDF ATTACHMENTS"
+uv run paperflow zotero verify-localized-attachments
+uv run paperflow zotero cleanup-stored-attachments
+uv run paperflow credentials zotero verify
+uv run paperflow credentials gemini verify --model gemini-2.5-flash
+uv run paperflow cleanup repair-abstracts --dry-run
+uv run paperflow cleanup repair-metadata --dry-run
+uv run paperflow cleanup plan-duplicates
+uv run paperflow zotero migration-audit
+```
+
+## App Sections
+
+- Dashboard: project, Zotero, migration, cleanup, vault, duplicate, and metadata
+  status from local files under `data/`.
+- Drop Shelf Settings: hot-zone placement, monitor mode, opacity, and collapse
+  timing.
+- Zotero Organize: backup, enrich metadata, detect duplicates, plan migration,
+  dry run, and confirmed apply migration.
+- Local Vault: vault status, initialization, and vault path planning.
+- Existing Attachments: workflows for localizing stored Zotero PDFs.
+- Cleanup Workbench: Missing Abstract, Missing Metadata, Duplicate Candidates,
+  Low Confidence, and Non-paper review surfaces. It reads local plans/reports
+  and calls backend cleanup commands; selected-only and per-field writes are
+  shown as backend-missing until implemented.
+- Reports: opens migration, preview, cleanup, dedupe, localization, and apply
+  log reports.
+- Settings: paths, hot-zone preferences, shortcuts, Zotero credentials, Gemini
+  credentials/quota status, local vault, collection mode, tag mode, and cleanup
+  safety defaults.
+- Logs: command output and app logs.
+
+## Drag and Drop
+
+Drag `.pdf` files toward the right edge near the bottom-right of the active
+screen. The hot-zone expands the floating shelf. Non-PDF files are rejected with
+a visible warning. Linked-local ingest copies PDFs into the local vault and
+creates Zotero linked attachment records:
+
+```bash
+uv run paperflow ingest <pdf_paths> --dry-run --storage-mode linked-local
+uv run paperflow ingest <pdf_paths> --apply --storage-mode linked-local
+```
+
+No PDF bytes are uploaded to Zotero Storage.
+
+Default shortcuts:
+
+- Option + Space: command window
+- Option + Shift + D: show/hide drop shelf
+- Option + Shift + I: Finder selection ingest placeholder
+
+## Safety
+
+Apply Migration requires typing:
+
+```text
+REPLACE MY ZOTERO COLLECTIONS
+```
+
+PDF ingest apply requires typing:
+
+```text
+INGEST LOCAL PDFS
+```
+
+Stored attachment cleanup requires typing:
+
+```text
+DELETE OLD STORED PDF ATTACHMENTS
+```
+
+Abstract and metadata cleanup applies require typing:
+
+```text
+APPLY ABSTRACT REPAIRS
+APPLY METADATA REPAIRS
+```
+
+The app writes its own logs to:
+
+```text
+~/Library/Logs/PaperFlow/
+```
+
+Secrets are redacted from displayed and saved command output.
+
+## Troubleshooting
+
+- If `uv` cannot be found, set the full executable path in Settings.
+- If Zotero Web API calls fail, verify that `ZOTERO_USER_ID` is numeric and the
+  API key has write permissions.
+- If Zotero Desktop does not show Web API changes, trigger Zotero data sync.
+- If PDFs are consuming Zotero Storage, check Zotero file sync settings.
+- If drag-and-drop paths cannot be read, move files into a user-owned folder
+  such as Downloads, Documents, or the PaperFlow vault.
+- If launch at login fails, add `dist/PaperFlow.app` manually in macOS System
+  Settings.

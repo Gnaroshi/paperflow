@@ -1,0 +1,36 @@
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# PaperFlow generated Zotero/library data.
+# These files can contain personal library metadata, item keys, reports,
+# backup snapshots, and apply logs. Keep only the placeholder in git.
+data/*
+!data/.gitkeep
+
+# Local user config
+config/protected_collections.yaml
+
+# SwiftPM / macOS app build output
+PaperFlowApp/.build/
+PaperFlowApp/.swiftpm/
+PaperFlowApp/dist/
+*.xcuserstate
+DerivedData/
+
+# Logs and temporary files
+*.log
+*.tmp
