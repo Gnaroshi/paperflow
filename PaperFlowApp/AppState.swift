@@ -385,7 +385,10 @@ final class AppState: ObservableObject {
             outputTokens: usage["output_tokens"] as? Int ?? 0,
             totalTokens: usage["total_tokens"] as? Int ?? 0,
             failedRateLimitCalls: usage["failed_rate_limit_calls"] as? Int ?? 0,
-            last429Time: usage["last_429_resource_exhausted_time"] as? String
+            last429Time: usage["last_429_resource_exhausted_time"] as? String,
+            lastSuccessTime: usage["last_success_time"] as? String,
+            lastInvalidKeyTime: usage["last_401_403_time"] as? String,
+            currentStatus: usage["current_status"] as? String ?? "unknown"
         )
         if geminiUsage.failedRateLimitCalls > 0 {
             geminiVerification.rateLimited = true
@@ -690,6 +693,10 @@ final class AppState: ObservableObject {
     }
 
     func runApplyMigration() {
+        guard zoteroVerification.writeAccess else {
+            invalidDropWarnings = ["Apply migration blocked: Zotero API key write access is missing or unverified."]
+            return
+        }
         runZotero(
             arguments: [
                 "apply-migration",
@@ -797,6 +804,9 @@ final class AppState: ObservableObject {
         var args = ["run", "paperflow", "cleanup", "repair-abstracts", "--dry-run"]
         if geminiCleanupEnabled && enableGeminiAbstractExtraction {
             args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+            if !stopOnGeminiQuotaHit {
+                args.append("--continue-on-gemini-quota")
+            }
         }
         runUV(arguments: args, timeoutSeconds: 1800)
     }
@@ -810,6 +820,9 @@ final class AppState: ObservableObject {
         var args = ["run", "paperflow", "cleanup", "repair-abstracts", "--dry-run", "--item-key", key]
         if geminiCleanupEnabled && enableGeminiAbstractExtraction {
             args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+            if !stopOnGeminiQuotaHit {
+                args.append("--continue-on-gemini-quota")
+            }
         }
         runUV(arguments: args, timeoutSeconds: 1800)
     }
@@ -822,6 +835,9 @@ final class AppState: ObservableObject {
         ]
         if geminiCleanupEnabled && enableGeminiAbstractExtraction {
             args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+            if !stopOnGeminiQuotaHit {
+                args.append("--continue-on-gemini-quota")
+            }
         }
         runUV(arguments: args, timeoutSeconds: 3600, destructive: true)
     }
@@ -840,15 +856,15 @@ final class AppState: ObservableObject {
         ]
         if geminiCleanupEnabled && enableGeminiAbstractExtraction {
             args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+            if !stopOnGeminiQuotaHit {
+                args.append("--continue-on-gemini-quota")
+            }
         }
         runUV(arguments: args, timeoutSeconds: 3600, destructive: true)
     }
 
     func runRepairMetadataDryRun() {
-        runUV(
-            arguments: ["run", "paperflow", "cleanup", "repair-metadata", "--dry-run"],
-            timeoutSeconds: 1800
-        )
+        runUV(arguments: metadataRepairArguments(apply: false), timeoutSeconds: 1800)
     }
 
     func runRepairMetadataDryRun(itemKey: String) {
@@ -857,22 +873,11 @@ final class AppState: ObservableObject {
             invalidDropWarnings = ["Select a metadata item first."]
             return
         }
-        runUV(
-            arguments: ["run", "paperflow", "cleanup", "repair-metadata", "--dry-run", "--item-key", key],
-            timeoutSeconds: 1800
-        )
+        runUV(arguments: metadataRepairArguments(apply: false, itemKey: key), timeoutSeconds: 1800)
     }
 
     func runApplyMetadataRepairs() {
-        runUV(
-            arguments: [
-                "run", "paperflow", "cleanup", "repair-metadata",
-                "--apply",
-                "--confirm", "APPLY METADATA REPAIRS"
-            ],
-            timeoutSeconds: 3600,
-            destructive: true
-        )
+        runUV(arguments: metadataRepairArguments(apply: true), timeoutSeconds: 3600, destructive: true)
     }
 
     func runApplyMetadataRepair(itemKey: String, approvedFields: [String]) {
@@ -881,12 +886,7 @@ final class AppState: ObservableObject {
             invalidDropWarnings = ["Select a metadata item first."]
             return
         }
-        var args = [
-            "run", "paperflow", "cleanup", "repair-metadata",
-            "--apply",
-            "--confirm", "APPLY METADATA REPAIRS",
-            "--item-key", key
-        ]
+        var args = metadataRepairArguments(apply: true, itemKey: key)
         for field in approvedFields {
             args += ["--approved-field", field]
         }
@@ -1037,7 +1037,10 @@ final class AppState: ObservableObject {
             "output_tokens": 0,
             "total_tokens": 0,
             "failed_rate_limit_calls": 0,
-            "last_429_resource_exhausted_time": NSNull()
+            "last_429_resource_exhausted_time": NSNull(),
+            "last_success_time": NSNull(),
+            "last_401_403_time": NSNull(),
+            "current_status": "unknown"
         ]
 
         current["date"] = current["date"] as? String ?? today
@@ -1050,11 +1053,21 @@ final class AppState: ObservableObject {
             current["input_tokens"] = (current["input_tokens"] as? Int ?? 0) + prompt
             current["output_tokens"] = (current["output_tokens"] as? Int ?? 0) + candidates
             current["total_tokens"] = (current["total_tokens"] as? Int ?? 0) + total
+            current["last_success_time"] = ISO8601DateFormatter().string(from: Date())
+            current["current_status"] = "ok"
         }
 
         if errorType == "rate_limited" {
             current["failed_rate_limit_calls"] = (current["failed_rate_limit_calls"] as? Int ?? 0) + 1
             current["last_429_resource_exhausted_time"] = ISO8601DateFormatter().string(from: Date())
+            current["current_status"] = "rate_limited"
+        } else if errorType == "invalid_key" {
+            current["last_401_403_time"] = ISO8601DateFormatter().string(from: Date())
+            current["current_status"] = "invalid_key"
+        } else if errorType == "service_error" {
+            current["current_status"] = "service_error"
+        } else if errorType != nil {
+            current["current_status"] = "unknown"
         }
 
         do {
@@ -1149,6 +1162,25 @@ final class AppState: ObservableObject {
         ]
         if offlineFast {
             args.append("--offline-fast")
+        }
+        return args
+    }
+
+    private func metadataRepairArguments(apply: Bool, itemKey: String? = nil) -> [String] {
+        var args = ["run", "paperflow", "cleanup", "repair-metadata"]
+        if apply {
+            args += ["--apply", "--confirm", "APPLY METADATA REPAIRS"]
+        } else {
+            args.append("--dry-run")
+        }
+        if let itemKey, !itemKey.isEmpty {
+            args += ["--item-key", itemKey]
+        }
+        if geminiCleanupEnabled && enableGeminiMetadataExtraction {
+            args += ["--enable-gemini", "--gemini-model", selectedGeminiModel]
+            if !stopOnGeminiQuotaHit {
+                args.append("--continue-on-gemini-quota")
+            }
         }
         return args
     }

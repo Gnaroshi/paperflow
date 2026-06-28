@@ -471,6 +471,11 @@ def cleanup_repair_abstracts(
         "--gemini-model",
         help="Gemini model for extraction fallback.",
     ),
+    continue_on_gemini_quota: bool = typer.Option(
+        False,
+        "--continue-on-gemini-quota",
+        help="Continue cleanup planning after Gemini reports rate limiting.",
+    ),
     item_key: list[str] | None = typer.Option(
         None,
         "--item-key",
@@ -486,6 +491,7 @@ def cleanup_repair_abstracts(
         enriched_path=enriched_items,
         enable_gemini=enable_gemini,
         gemini_model=gemini_model,
+        stop_on_gemini_quota_hit=not continue_on_gemini_quota,
         item_keys=set(item_key) if item_key else None,
     )
     dump_json_data(output_path, plan)
@@ -548,6 +554,21 @@ def cleanup_repair_metadata(
         "--approved-field",
         help="Limit metadata writes to approved fields from the repair diff. Can be repeated.",
     ),
+    enable_gemini: bool = typer.Option(
+        False,
+        "--enable-gemini",
+        help="Use Gemini as a final extraction-only fallback.",
+    ),
+    gemini_model: str = typer.Option(
+        DEFAULT_GEMINI_MODEL,
+        "--gemini-model",
+        help="Gemini model for extraction fallback.",
+    ),
+    continue_on_gemini_quota: bool = typer.Option(
+        False,
+        "--continue-on-gemini-quota",
+        help="Continue cleanup planning after Gemini reports rate limiting.",
+    ),
 ) -> None:
     """Repair Missing Metadata cleanup items with field-level diffs."""
 
@@ -558,6 +579,9 @@ def cleanup_repair_metadata(
         enriched_items,
         item_keys=set(item_key) if item_key else None,
         approved_fields=set(approved_field) if approved_field else None,
+        enable_gemini=enable_gemini,
+        gemini_model=gemini_model,
+        stop_on_gemini_quota_hit=not continue_on_gemini_quota,
     )
     dump_json_data(output_path, plan)
     write_metadata_repair_report(plan, report_path)

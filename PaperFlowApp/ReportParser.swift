@@ -158,11 +158,30 @@ enum ReportParser {
             return contentType.contains("pdf") || filename.hasSuffix(".pdf")
         }
         let localPDFPaths = pdfAttachments.compactMap { string($0["localPath"]) }.filter { !$0.isEmpty }
+        let linkedCount = pdfAttachments.filter { string($0["linkMode"]) == "linked_file" || string($0["path"])?.hasPrefix("attachments:") == true }.count
+        let storedCount = pdfAttachments.filter { attachment in
+            let linkMode = string(attachment["linkMode"]) ?? ""
+            let path = string(attachment["path"]) ?? ""
+            return linkMode == "imported_file" || path.hasPrefix("storage:")
+        }.count
+        let pdfStorageState: String
+        if pdfAttachments.isEmpty {
+            pdfStorageState = "no PDF"
+        } else if storedCount > 0 && linkedCount > 0 {
+            pdfStorageState = "\(linkedCount) linked, \(storedCount) stored"
+        } else if storedCount > 0 {
+            pdfStorageState = "\(storedCount) stored"
+        } else if linkedCount > 0 || !localPDFPaths.isEmpty {
+            pdfStorageState = "\(max(linkedCount, localPDFPaths.count)) linked"
+        } else {
+            pdfStorageState = "unknown"
+        }
         let reading = enrichedItem["reading_activity"] as? [String: Any] ?? [:]
         let noteCount = int(reading["note_count"]) ?? int(enrichedItem["noteCount"]) ?? 0
         let annotationCount = int(reading["annotation_count"]) ?? int(enrichedItem["annotationCount"]) ?? 0
         let highlightCount = int(reading["highlight_count"]) ?? 0
         let underlineCount = int(reading["underline_count"]) ?? 0
+        let commentCount = int(reading["comment_count"]) ?? 0
         let currentAbstract = string(enrichedItem["abstractNote"]) ?? ""
         let readingWorkPresent = bool(reading["has_reading_work"])
             || noteCount > 0
@@ -198,10 +217,12 @@ enum ReportParser {
             pdfAttachmentStatus: pdfAttachments.isEmpty
                 ? "no PDF attachment"
                 : "\(pdfAttachments.count) PDF attachment\(pdfAttachments.count == 1 ? "" : "s")",
+            pdfStorageState: pdfStorageState,
             noteCount: noteCount,
             annotationCount: annotationCount,
             highlightCount: highlightCount,
             underlineCount: underlineCount,
+            commentCount: commentCount,
             childNoteCount: noteCount,
             readingWorkPresent: readingWorkPresent,
             duplicateRole: string(migrationItem["duplicate_role"]) ?? "",
@@ -279,6 +300,7 @@ enum ReportParser {
                 matchType: string(group["match_type"]) ?? "",
                 canonicalItemKey: string(group["canonical_item_key"]) ?? "",
                 recommendedAction: string(group["recommended_action"]) ?? "",
+                canonicalReason: string(group["canonical_reason"]) ?? "",
                 metadataMergeSuggested: bool(group["metadata_merge_suggested"]),
                 suggestedMetadataSourceItemKey: string(group["suggested_metadata_source_item_key"]) ?? "",
                 items: duplicateItems

@@ -204,13 +204,20 @@ struct SettingsView: View {
                 Toggle("Enable Gemini cleanup", isOn: $state.geminiCleanupEnabled)
                 Toggle("Stop batch cleanup when Gemini quota is hit", isOn: $state.stopOnGeminiQuotaHit)
                 StatusLine(label: "Gemini status", value: state.geminiVerification.message)
+                StatusLine(label: "Quota/rate status", value: state.geminiUsage.quotaStatus)
                 StatusLine(label: "Requests today", value: "\(state.geminiUsage.requestCount)")
                 StatusLine(label: "Input tokens", value: "\(state.geminiUsage.inputTokens)")
                 StatusLine(label: "Output tokens", value: "\(state.geminiUsage.outputTokens)")
                 StatusLine(label: "Total tokens", value: "\(state.geminiUsage.totalTokens)")
                 StatusLine(label: "Rate-limit calls", value: "\(state.geminiUsage.failedRateLimitCalls)")
+                if let lastSuccess = state.geminiUsage.lastSuccessTime {
+                    StatusLine(label: "Last success", value: lastSuccess)
+                }
                 if let last429 = state.geminiUsage.last429Time {
                     StatusLine(label: "Last 429", value: last429)
+                }
+                if let lastInvalid = state.geminiUsage.lastInvalidKeyTime {
+                    StatusLine(label: "Last 401/403", value: lastInvalid)
                 }
                 if state.geminiVerification.rateLimited || state.geminiUsage.failedRateLimitCalls > 0 {
                     Text("Gemini Flash is currently rate-limited. Try later or reduce batch size.")

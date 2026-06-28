@@ -456,13 +456,22 @@ struct GeminiUsageSummary {
     var totalTokens = 0
     var failedRateLimitCalls = 0
     var last429Time: String?
+    var lastSuccessTime: String?
+    var lastInvalidKeyTime: String?
+    var currentStatus = "unknown"
 
     var quotaStatus: String {
-        if failedRateLimitCalls > 0 {
+        if currentStatus == "rate_limited" || failedRateLimitCalls > 0 {
             return "Rate-limited"
         }
+        if currentStatus == "invalid_key" {
+            return "Invalid key"
+        }
+        if currentStatus == "service_error" {
+            return "Service error"
+        }
         if requestCount > 0 {
-            return "Active"
+            return currentStatus == "ok" ? "OK" : "Active"
         }
         return "No usage today"
     }
@@ -493,10 +502,12 @@ struct CleanupWorkbenchItem: Identifiable, Hashable {
     let abstractStatus: String
     let currentAbstract: String
     let pdfAttachmentStatus: String
+    let pdfStorageState: String
     let noteCount: Int
     let annotationCount: Int
     let highlightCount: Int
     let underlineCount: Int
+    let commentCount: Int
     let childNoteCount: Int
     let readingWorkPresent: Bool
     let duplicateRole: String
@@ -538,6 +549,7 @@ struct DuplicateWorkbenchGroup: Identifiable, Hashable {
     let matchType: String
     let canonicalItemKey: String
     let recommendedAction: String
+    let canonicalReason: String
     let metadataMergeSuggested: Bool
     let suggestedMetadataSourceItemKey: String
     let items: [DuplicateWorkbenchItem]

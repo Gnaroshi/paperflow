@@ -8,6 +8,7 @@ struct CleanupWorkbenchView: View {
     @State private var explainQuery = ""
     @State private var selectedAbstractItemKey = ""
     @State private var selectedMetadataItemKey = ""
+    @State private var approvedMetadataFields: [String: Set<String>] = [:]
 
     private var explainedItems: [CleanupWorkbenchItem] {
         ReportParser.explainItems(dataURL: state.dataURL, query: explainQuery)
@@ -43,6 +44,7 @@ struct CleanupWorkbenchView: View {
                 MissingMetadataPane(
                     items: data.missingMetadata,
                     selectedItemKey: $selectedMetadataItemKey,
+                    approvedFields: $approvedMetadataFields,
                     repairSelected: selectedMetadataRepair,
                     repairAllDryRun: state.runRepairMetadataDryRun,
                     applySelected: selectedMetadataApply,
@@ -128,6 +130,9 @@ struct CleanupWorkbenchView: View {
 
     private func reload() {
         data = ReportParser.cleanupWorkbenchData(dataURL: state.dataURL)
+        for item in data.missingMetadata where approvedMetadataFields[item.itemKey] == nil {
+            approvedMetadataFields[item.itemKey] = Set(item.metadataDiffs.map(\.field))
+        }
     }
 
     private func selectedAbstractRepair() {
@@ -159,10 +164,12 @@ struct CleanupWorkbenchView: View {
             state.invalidDropWarnings = ["Select a metadata item first."]
             return
         }
-        let approvedFields = data.missingMetadata
+        let availableFields = data.missingMetadata
             .first { $0.itemKey == selectedMetadataItemKey }?
             .metadataDiffs
             .map(\.field) ?? []
+        let selectedFields = approvedMetadataFields[selectedMetadataItemKey, default: Set(availableFields)]
+        let approvedFields = availableFields.filter { selectedFields.contains($0) }
         confirm(.applySelectedMetadataRepair(selectedMetadataItemKey, approvedFields))
     }
 }
@@ -226,6 +233,7 @@ private struct MissingAbstractPane: View {
 private struct MissingMetadataPane: View {
     let items: [CleanupWorkbenchItem]
     @Binding var selectedItemKey: String
+    @Binding var approvedFields: [String: Set<String>]
     let repairSelected: () -> Void
     let repairAllDryRun: () -> Void
     let applySelected: () -> Void
@@ -269,11 +277,27 @@ private struct MissingMetadataPane: View {
                                                     .foregroundStyle(.secondary)
                                                 Text("After: \(diff.after)")
                                             }
-                                            Toggle("Approve", isOn: .constant(true))
-                                                .disabled(true)
+                                            Toggle(
+                                                "Approve",
+                                                isOn: Binding(
+                                                    get: {
+                                                        approvedFields[item.itemKey, default: Set(item.metadataDiffs.map(\.field))]
+                                                            .contains(diff.field)
+                                                    },
+                                                    set: { enabled in
+                                                        var fields = approvedFields[item.itemKey, default: Set(item.metadataDiffs.map(\.field))]
+                                                        if enabled {
+                                                            fields.insert(diff.field)
+                                                        } else {
+                                                            fields.remove(diff.field)
+                                                        }
+                                                        approvedFields[item.itemKey] = fields
+                                                    }
+                                                )
+                                            )
                                         }
                                     }
-                                    Text("Per-field approval is displayed here, but selected field apply needs backend support before it can write.")
+                                    Text("Apply Selected Repairs sends only approved fields to the backend.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -304,6 +328,7 @@ private struct DuplicateCandidatesPane: View {
                                 .foregroundStyle(.secondary)
                         }
                         StatusLine(label: "Canonical", value: group.canonicalItemKey)
+                        StatusLine(label: "Canonical reason", value: group.canonicalReason.isEmpty ? "(not provided)" : group.canonicalReason)
                         StatusLine(label: "Recommended", value: group.recommendedAction)
                         if group.metadataMergeSuggested {
                             WarningBox(text: "Metadata merge suggested from \(group.suggestedMetadataSourceItemKey). Keep reading work on the canonical item.")
@@ -341,6 +366,7 @@ private struct CleanupItemList: View {
 private struct CleanupItemCard<Extra: View>: View {
     let item: CleanupWorkbenchItem
     let extra: Extra
+    @EnvironmentObject private var state: AppState
 
     init(item: CleanupWorkbenchItem, @ViewBuilder extra: () -> Extra) {
         self.item = item
@@ -369,11 +395,13 @@ private struct CleanupItemCard<Extra: View>: View {
                 SmallFact(label: "Publication", value: item.publicationTitle.isEmpty ? "(missing)" : item.publicationTitle)
                 SmallFact(label: "Abstract", value: item.abstractStatus)
                 SmallFact(label: "PDF", value: item.pdfAttachmentStatus)
+                SmallFact(label: "PDF storage", value: item.pdfStorageState)
                 SmallFact(label: "Reading work", value: item.readingWorkPresent ? "yes" : "no")
                 SmallFact(label: "Notes", value: "\(item.noteCount)")
                 SmallFact(label: "Annotations", value: "\(item.annotationCount)")
                 SmallFact(label: "Highlights", value: "\(item.highlightCount)")
                 SmallFact(label: "Underlines", value: "\(item.underlineCount)")
+                SmallFact(label: "Comments", value: "\(item.commentCount)")
                 SmallFact(label: "Child notes", value: "\(item.childNoteCount)")
             }
             Text("Rationale: \(item.rationale)")
@@ -383,6 +411,12 @@ private struct CleanupItemCard<Extra: View>: View {
                 Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                 Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                     .disabled(item.localPDFPaths.isEmpty)
+                Button("Explain item") { state.runExplainItem(item.itemKey) }
+                Button("Repair metadata") { state.runRepairMetadataDryRun(itemKey: item.itemKey) }
+                Button("Repair abstract") { state.runRepairAbstractDryRun(itemKey: item.itemKey) }
+                Button("Mark reviewed") {
+                    state.invalidDropWarnings = ["Backend command missing: cleanup review state persistence for \(item.itemKey)."]
+                }
             }
         }
         .padding(12)

@@ -129,10 +129,17 @@ def test_gemini_error_classification_and_usage(tmp_path: Path) -> None:
     assert stored["input_tokens"] == 2
     assert stored["output_tokens"] == 3
     assert stored["total_tokens"] == 5
+    assert stored["current_status"] == "ok"
+    assert stored["last_success_time"]
 
     limited = record_gemini_usage(error_type="rate_limited", path=tmp_path / "usage.json")
     assert limited["failed_rate_limit_calls"] == 1
     assert limited["last_429_resource_exhausted_time"]
+    assert limited["current_status"] == "rate_limited"
+
+    invalid = record_gemini_usage(error_type="invalid_key", path=tmp_path / "usage.json")
+    assert invalid["last_401_403_time"]
+    assert invalid["current_status"] == "invalid_key"
 
 
 def test_existing_abstract_resolves_missing_abstract(tmp_path: Path) -> None:
@@ -269,6 +276,54 @@ def test_gemini_invented_abstract_is_rejected() -> None:
     )
 
 
+def test_batch_cleanup_stops_when_gemini_quota_is_hit(tmp_path: Path, monkeypatch) -> None:
+    migration_path = tmp_path / "migration.json"
+    enriched_path = tmp_path / "items.jsonl"
+    write_json(migration_path, _migration_plan([_migration_item("ITEM1"), _migration_item("ITEM2")]))
+    write_jsonl(
+        enriched_path,
+        [
+            EnrichedZoteroItem(
+                key="ITEM1",
+                itemType="journalArticle",
+                title="First Paper",
+                normalized_title="first paper",
+                metadata_quality_score=0.3,
+            ),
+            EnrichedZoteroItem(
+                key="ITEM2",
+                itemType="journalArticle",
+                title="Second Paper",
+                normalized_title="second paper",
+                metadata_quality_score=0.3,
+            ),
+        ],
+    )
+    monkeypatch.setattr("paperflow.cleanup_workbench.first_pdf_text", lambda item: "No abstract here.")
+
+    class RateLimitedGemini:
+        def __init__(self, *args, **kwargs):
+            self.calls = 0
+
+        def generate(self, prompt: str) -> dict:
+            self.calls += 1
+            return {"ok": False, "error_type": "rate_limited", "message": "quota"}
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("paperflow.cleanup_workbench.GeminiClient", RateLimitedGemini)
+
+    plan = build_abstract_repair_plan(
+        migration_path,
+        enriched_path,
+        enable_gemini=True,
+        stop_on_gemini_quota_hit=True,
+    )
+
+    assert plan["repairs"] == []
+
+
 def test_duplicate_resolution_shows_canonical_and_duplicate(tmp_path: Path) -> None:
     migration_path = tmp_path / "migration.json"
     dedupe_path = tmp_path / "dedupe.json"
@@ -320,6 +375,7 @@ def test_duplicate_resolution_shows_canonical_and_duplicate(tmp_path: Path) -> N
     output = duplicate_resolution_plan(dedupe_path, migration_path)
 
     assert output["groups"][0]["canonical_item_key"] == "CAN"
+    assert output["groups"][0]["canonical_reason"] == "reading work"
     assert output["groups"][0]["items"][1]["item_key"] == "DUP"
     assert output["groups"][0]["metadata_merge_suggested"] is True
 

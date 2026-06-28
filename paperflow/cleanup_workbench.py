@@ -124,6 +124,73 @@ def gemini_extract_abstract_from_text(
     }
 
 
+def _trusted_arxiv_id_from_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    # Only trust explicit arXiv sources in extracted text; do not mine DOI fragments.
+    arxiv_id = arxiv_id_from_url(value)
+    if arxiv_id:
+        return arxiv_id
+    match = re.search(
+        r"(?i)\barxiv\s*:\s*(?P<id>(?:\d{2})(?:0[1-9]|1[0-2])\.\d{4,5}(?:v\d+)?)",
+        value,
+    )
+    return match.group("id").lower() if match else None
+
+
+def gemini_extract_metadata_from_text(
+    title: str | None,
+    pdf_text: str,
+    gemini: GeminiClient,
+) -> dict[str, Any]:
+    prompt = (
+        "Extract bibliographic metadata only from the provided paper text. "
+        "Return strict JSON with keys doi, arxiv_id, url, year, publication_title, abstract. "
+        "Use null for unknown fields. Do not infer IDs from unrelated numeric fragments. "
+        "Do not summarize or invent abstracts; abstract must be copied verbatim if present.\n\n"
+        f"Title: {title or ''}\n\nTEXT:\n{pdf_text[:12000]}"
+    )
+    result = gemini.generate(prompt)
+    if not result.get("ok"):
+        return {"ok": False, "error": result}
+    raw = result.get("raw") or {}
+    try:
+        text = raw["candidates"][0]["content"]["parts"][0]["text"]
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+        payload = json.loads(text)
+    except Exception:
+        return {"ok": False, "error": {"error_type": "invalid_gemini_json"}}
+
+    source = normalize_text(pdf_text)
+    doi = normalize_doi(payload.get("doi"))
+    if doi and doi.lower() not in source.lower():
+        doi = None
+    arxiv_id = _trusted_arxiv_id_from_text(source)
+    returned_arxiv = normalize_text(payload.get("arxiv_id"))
+    if returned_arxiv and arxiv_id and returned_arxiv.lower().removesuffix(".pdf").startswith(arxiv_id):
+        arxiv_id = returned_arxiv.lower().removesuffix(".pdf")
+    url = normalize_text(payload.get("url"))
+    if url and url.lower() not in source.lower():
+        url = None
+    year = payload.get("year")
+    year_text = str(year) if year is not None else ""
+    if not re.fullmatch(r"(19|20|21)\d{2}", year_text):
+        year = None
+    publication_title = normalize_text(payload.get("publication_title"))
+    abstract = normalize_text(payload.get("abstract"))
+    if abstract and not abstract_text_is_verbatim(source, abstract):
+        abstract = None
+    return {
+        "ok": True,
+        "doi_normalized": doi,
+        "arxiv_id": arxiv_id,
+        "url": url,
+        "year": int(year) if year else None,
+        "publication_title": publication_title,
+        "abstract": abstract,
+    }
+
+
 def fetch_arxiv_abstract(arxiv_id: str, client: httpx.Client | None = None) -> str | None:
     close = client is None
     client = client or httpx.Client(timeout=20)
@@ -174,6 +241,7 @@ def build_abstract_repair_plan(
     enriched_path: Path = Path("data/zotero_items_enriched.jsonl"),
     enable_gemini: bool = False,
     gemini_model: str = "gemini-2.5-flash",
+    stop_on_gemini_quota_hit: bool = True,
     item_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     plan, enriched = load_workbench_inputs(migration_plan_path, enriched_path)
@@ -230,6 +298,11 @@ def build_abstract_repair_plan(
                     }
                 elif enable_gemini and gemini is not None and pdf_text:
                     gemini_result = gemini_extract_abstract_from_text(item.title, pdf_text, gemini)
+                    if (
+                        stop_on_gemini_quota_hit
+                        and (gemini_result.get("error") or {}).get("error_type") == "rate_limited"
+                    ):
+                        break
                     if gemini_result.get("found"):
                         candidate = gemini_result
             repairs.append(
@@ -320,48 +393,83 @@ def build_metadata_repair_plan(
     enriched_path: Path = Path("data/zotero_items_enriched.jsonl"),
     item_keys: set[str] | None = None,
     approved_fields: set[str] | None = None,
+    enable_gemini: bool = False,
+    gemini_model: str = "gemini-2.5-flash",
+    stop_on_gemini_quota_hit: bool = True,
 ) -> dict[str, Any]:
     plan, enriched = load_workbench_inputs(migration_plan_path, enriched_path)
     target_keys = cleanup_item_keys(plan, MISSING_METADATA_COLLECTION, "cleanup/missing-metadata")
     if item_keys is not None:
         target_keys &= item_keys
     repairs: list[dict[str, Any]] = []
-    for item_key in sorted(target_keys):
-        item = enriched.get(item_key)
-        if not item:
-            continue
-        pdf_text = first_pdf_text(item)
-        doi_match = DOI_RE.search(pdf_text)
-        doi = normalize_doi(doi_match.group(0)) if doi_match else item.doi_normalized
-        arxiv_id = detect_arxiv_id(item, doi)
-        updates: dict[str, Any] = {}
-        if doi and doi != item.doi_normalized:
-            updates["doi_normalized"] = {"before": item.doi_normalized, "after": doi}
-        if arxiv_id and arxiv_id != item.arxiv_id:
-            updates["arxiv_id"] = {"before": item.arxiv_id, "after": arxiv_id}
-        crossref = fetch_crossref_metadata(doi) if doi else {}
-        if crossref.get("url") and not item.url:
-            updates["url"] = {"before": item.url, "after": crossref["url"]}
-        if crossref.get("year") and not item.year:
-            updates["year"] = {"before": item.year, "after": crossref["year"]}
-        if crossref.get("publication_title") and not item.publication_title:
-            updates["publication_title"] = {
-                "before": item.publication_title,
-                "after": crossref["publication_title"],
-            }
-        if crossref.get("abstract") and not item.abstract_note:
-            updates["abstract"] = {"before": item.abstract_note, "after": crossref["abstract"]}
-        if approved_fields is not None:
-            updates = {field: diff for field, diff in updates.items() if field in approved_fields}
-        repairs.append(
-            {
-                "item_key": item.key,
-                "title": item.title,
-                "updates": updates,
-                "approved_fields": sorted(updates),
-                "safe_to_apply": bool(updates),
-            }
-        )
+    gemini = GeminiClient(model=gemini_model) if enable_gemini else None
+    try:
+        for item_key in sorted(target_keys):
+            item = enriched.get(item_key)
+            if not item:
+                continue
+            pdf_text = first_pdf_text(item)
+            doi_match = DOI_RE.search(pdf_text)
+            doi = normalize_doi(doi_match.group(0)) if doi_match else item.doi_normalized
+            arxiv_id = detect_arxiv_id(item, doi)
+            updates: dict[str, Any] = {}
+            if doi and doi != item.doi_normalized:
+                updates["doi_normalized"] = {"before": item.doi_normalized, "after": doi}
+            if arxiv_id and arxiv_id != item.arxiv_id:
+                updates["arxiv_id"] = {"before": item.arxiv_id, "after": arxiv_id}
+            crossref = fetch_crossref_metadata(doi) if doi else {}
+            if crossref.get("url") and not item.url:
+                updates["url"] = {"before": item.url, "after": crossref["url"]}
+            if crossref.get("year") and not item.year:
+                updates["year"] = {"before": item.year, "after": crossref["year"]}
+            if crossref.get("publication_title") and not item.publication_title:
+                updates["publication_title"] = {
+                    "before": item.publication_title,
+                    "after": crossref["publication_title"],
+                }
+            if crossref.get("abstract") and not item.abstract_note:
+                updates["abstract"] = {"before": item.abstract_note, "after": crossref["abstract"]}
+            if enable_gemini and gemini is not None and pdf_text:
+                gemini_result = gemini_extract_metadata_from_text(item.title, pdf_text, gemini)
+                error = gemini_result.get("error") or {}
+                if stop_on_gemini_quota_hit and error.get("error_type") == "rate_limited":
+                    break
+                if gemini_result.get("ok"):
+                    if gemini_result.get("doi_normalized") and not item.doi_normalized:
+                        updates.setdefault(
+                            "doi_normalized",
+                            {"before": item.doi_normalized, "after": gemini_result["doi_normalized"]},
+                        )
+                    if gemini_result.get("arxiv_id") and not item.arxiv_id:
+                        updates.setdefault(
+                            "arxiv_id",
+                            {"before": item.arxiv_id, "after": gemini_result["arxiv_id"]},
+                        )
+                    if gemini_result.get("url") and not item.url:
+                        updates.setdefault("url", {"before": item.url, "after": gemini_result["url"]})
+                    if gemini_result.get("year") and not item.year:
+                        updates.setdefault("year", {"before": item.year, "after": gemini_result["year"]})
+                    if gemini_result.get("publication_title") and not item.publication_title:
+                        updates.setdefault(
+                            "publication_title",
+                            {"before": item.publication_title, "after": gemini_result["publication_title"]},
+                        )
+                    if gemini_result.get("abstract") and not item.abstract_note:
+                        updates.setdefault("abstract", {"before": item.abstract_note, "after": gemini_result["abstract"]})
+            if approved_fields is not None:
+                updates = {field: diff for field, diff in updates.items() if field in approved_fields}
+            repairs.append(
+                {
+                    "item_key": item.key,
+                    "title": item.title,
+                    "updates": updates,
+                    "approved_fields": sorted(updates),
+                    "safe_to_apply": bool(updates),
+                }
+            )
+    finally:
+        if gemini is not None:
+            gemini.close()
     return {
         "schema_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -461,6 +569,7 @@ def duplicate_resolution_plan(
                 "normalized_title": group.normalized_title,
                 "match_type": group.match_type,
                 "canonical_item_key": group.canonical_item_key,
+                "canonical_reason": group.canonical_reason,
                 "recommended_action": group.recommended_action,
                 "metadata_merge_suggested": group.metadata_merge_suggested,
                 "suggested_metadata_source_item_key": group.suggested_metadata_source_item_key,
@@ -482,6 +591,7 @@ def write_duplicate_resolution_report(plan: dict[str, Any], path: Path) -> None:
             f"## {group['normalized_title']}\n\n"
             f"- Match type: {group['match_type']}\n"
             f"- Canonical: {group['canonical_item_key']}\n"
+            f"- Canonical reason: {group.get('canonical_reason') or '(unknown)'}\n"
             f"- Metadata merge suggested: {group['metadata_merge_suggested']}\n"
         )
         for item in group["items"]:
@@ -514,7 +624,9 @@ def explain_item(
         "item_key": item_key,
         "title": row.title,
         "old_collections": row.existing_collection_keys,
+        "old_tags": row.existing_tags,
         "new_collections": row.target_collections,
+        "new_tags": row.normalized_tags,
         "added_tags": update.get("tagsAdded", []),
         "removed_tags": update.get("tagsRemoved", []),
         "cleanup_flags": [tag for tag in row.normalized_tags if tag.startswith("cleanup/")],

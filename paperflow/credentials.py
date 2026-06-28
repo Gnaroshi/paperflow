@@ -140,6 +140,9 @@ def load_gemini_usage(path: Path | None = None) -> dict[str, Any]:
             "total_tokens": 0,
             "failed_rate_limit_calls": 0,
             "last_429_resource_exhausted_time": None,
+            "last_success_time": None,
+            "last_401_403_time": None,
+            "current_status": "unknown",
         }
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -162,9 +165,19 @@ def record_gemini_usage(
         current["total_tokens"] = int(current.get("total_tokens") or 0) + usage.get(
             "totalTokenCount", 0
         )
+        current["last_success_time"] = datetime.now(timezone.utc).isoformat()
+        current["current_status"] = "ok"
     if error_type == "rate_limited":
         current["failed_rate_limit_calls"] = int(current.get("failed_rate_limit_calls") or 0) + 1
         current["last_429_resource_exhausted_time"] = datetime.now(timezone.utc).isoformat()
+        current["current_status"] = "rate_limited"
+    elif error_type == "invalid_key":
+        current["last_401_403_time"] = datetime.now(timezone.utc).isoformat()
+        current["current_status"] = "invalid_key"
+    elif error_type == "service_error":
+        current["current_status"] = "service_error"
+    elif error_type:
+        current["current_status"] = "unknown"
     dump_json_data(path, current)
     return current
 
