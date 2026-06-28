@@ -6,7 +6,6 @@ struct DropShelfView: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject var controller: FloatingDropShelfController
     @State private var applyConfirmation = ""
-    @State private var isTargeted = false
     @State private var processingStartedAt: Date?
 
     var body: some View {
@@ -17,17 +16,7 @@ struct DropShelfView: View {
                 compactPill
             }
         }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isTargeted) { providers in
-            loadFileURLs(from: providers)
-            return true
-        }
-        .onChange(of: isTargeted) { targeted in
-            if targeted {
-                controller.dragHover(valid: true)
-            } else if state.dropShelfPhase == .hoveringValidPDF || state.dropShelfPhase == .hoveringInvalidFile {
-                controller.dragExited()
-            }
-        }
+        .onDrop(of: [UTType.fileURL], delegate: PDFDropDelegate(state: state, controller: controller))
         .onChange(of: state.runner.status) { status in
             switch status {
             case .running:
@@ -137,11 +126,11 @@ struct DropShelfView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(borderColor.opacity(isTargeted ? 0.95 : 0.65), lineWidth: isTargeted ? 2 : 1)
+                .stroke(borderColor.opacity(dragHighlightActive ? 0.95 : 0.65), lineWidth: dragHighlightActive ? 2 : 1)
         )
-        .shadow(color: borderColor.opacity(isTargeted ? 0.35 : 0.12), radius: isTargeted ? 18 : 8)
-        .scaleEffect(isTargeted ? 1.015 : 1)
-        .animation(.easeOut(duration: 0.16), value: isTargeted)
+        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.35 : 0.12), radius: dragHighlightActive ? 18 : 8)
+        .scaleEffect(dragHighlightActive ? 1.015 : 1)
+        .animation(.easeOut(duration: 0.16), value: dragHighlightActive)
     }
 
     @ViewBuilder
@@ -472,20 +461,57 @@ struct DropShelfView: View {
         VStack(spacing: 6) {
             Image(systemName: "doc.badge.plus")
                 .font(.title2)
-            Text("Drop PDFs here")
+            Text(dropTargetTitle)
                 .font(.subheadline)
                 .fontWeight(.medium)
-            Text("linked-local only; no Zotero Storage upload")
+            Text(dropTargetSubtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 92)
-        .background(Color.accentColor.opacity(isTargeted ? 0.16 : 0.08))
+        .background(dropTargetBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.accentColor.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [5]))
+                .stroke(borderColor.opacity(dragHighlightActive ? 0.8 : 0.35), style: StrokeStyle(lineWidth: dragHighlightActive ? 2 : 1, dash: [5]))
         )
+    }
+
+    private var dragHighlightActive: Bool {
+        state.dropShelfPhase == .hoveringValidPDF || state.dropShelfPhase == .hoveringInvalidFile
+    }
+
+    private var dropTargetTitle: String {
+        switch state.dropShelfPhase {
+        case .hoveringValidPDF:
+            return "Release to preview PDFs"
+        case .hoveringInvalidFile:
+            return "Only PDF files are accepted"
+        default:
+            return "Drop PDFs here"
+        }
+    }
+
+    private var dropTargetSubtitle: String {
+        switch state.dropShelfPhase {
+        case .hoveringValidPDF:
+            return "\(state.shelfLastResult) linked-local only; no Zotero Storage upload"
+        case .hoveringInvalidFile:
+            return state.invalidDropWarnings.first ?? "Non-PDF files will be rejected"
+        default:
+            return "linked-local only; no Zotero Storage upload"
+        }
+    }
+
+    private var dropTargetBackground: Color {
+        switch state.dropShelfPhase {
+        case .hoveringInvalidFile:
+            return Color.red.opacity(0.14)
+        case .hoveringValidPDF:
+            return Color.accentColor.opacity(0.18)
+        default:
+            return Color.accentColor.opacity(0.08)
+        }
     }
 
     private var borderColor: Color {
@@ -503,7 +529,7 @@ struct DropShelfView: View {
         }
     }
 
-    private func loadFileURLs(from providers: [NSItemProvider]) {
+    fileprivate static func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
         let group = DispatchGroup()
         let lock = NSLock()
         var urls: [URL] = []
@@ -529,7 +555,47 @@ struct DropShelfView: View {
         }
 
         group.notify(queue: .main) {
+            completion(urls)
+        }
+    }
+}
+
+private struct PDFDropDelegate: DropDelegate {
+    let state: AppState
+    let controller: FloatingDropShelfController
+
+    func validateDrop(info: DropInfo) -> Bool {
+        !info.itemProviders(for: [UTType.fileURL]).isEmpty
+    }
+
+    func dropEntered(info: DropInfo) {
+        let providers = info.itemProviders(for: [UTType.fileURL])
+        guard !providers.isEmpty else {
+            state.invalidDropWarnings = ["Only PDF files are accepted."]
+            controller.dragHover(valid: false, fileCount: 0)
+            return
+        }
+        DropShelfView.loadFileURLs(from: providers) { urls in
+            let pdfs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+            let invalids = urls.filter { $0.pathExtension.lowercased() != "pdf" }
+            state.invalidDropWarnings = invalids.map { "Ignored non-PDF: \($0.lastPathComponent)" }
+            controller.dragHover(valid: !pdfs.isEmpty && invalids.isEmpty, fileCount: pdfs.count)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        controller.dragExited()
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let providers = info.itemProviders(for: [UTType.fileURL])
+        DropShelfView.loadFileURLs(from: providers) { urls in
             controller.handleDropped(urls)
         }
+        return true
     }
 }
