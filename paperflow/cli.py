@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from enum import StrEnum
 from pathlib import Path
 
@@ -55,8 +56,10 @@ from paperflow.attachment_localize import (
 )
 from paperflow.dedupe import detect_duplicates_file
 from paperflow.ingest import (
+    ProgressEmitter,
     StorageMode,
     apply_ingest_plan,
+    build_ingest_debug_trace,
     build_ingest_plan,
     validate_ingest_request,
     write_ingest_report,
@@ -254,6 +257,56 @@ def ingest(
         "--report",
         help="Ingest report Markdown output.",
     ),
+    progress_jsonl: bool = typer.Option(
+        False,
+        "--progress-jsonl",
+        help="Emit machine-readable progress events as JSON Lines.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Emit extra progress/debug context.",
+    ),
+    debug_trace: bool = typer.Option(
+        False,
+        "--debug-trace",
+        help="Emit an ingest debug trace with file and metadata decisions.",
+    ),
+    total_timeout_seconds: int = typer.Option(
+        60,
+        "--total-timeout-seconds",
+        help="Total ingest dry-run timeout budget in seconds.",
+    ),
+    network_timeout_seconds: int = typer.Option(
+        10,
+        "--network-timeout-seconds",
+        help="Timeout for each arXiv/Crossref metadata call.",
+    ),
+    pdf_timeout_seconds: int = typer.Option(
+        20,
+        "--pdf-timeout-seconds",
+        help="PDF parsing timeout budget in seconds.",
+    ),
+    llm_timeout_seconds: int = typer.Option(
+        30,
+        "--llm-timeout-seconds",
+        help="LLM timeout budget if LLM extraction is explicitly enabled.",
+    ),
+    no_gemini: bool = typer.Option(
+        False,
+        "--no-gemini",
+        help="Disable Gemini/LLM use. This is the default for dry-run.",
+    ),
+    no_network: bool = typer.Option(
+        False,
+        "--no-network",
+        help="Disable arXiv/Crossref network metadata calls.",
+    ),
+    offline_fast: bool = typer.Option(
+        False,
+        "--offline-fast",
+        help="Fast local-only dry-run: disables network and Gemini.",
+    ),
 ) -> None:
     """Ingest PDFs as local vault files and Zotero linked attachments."""
 
@@ -275,14 +328,79 @@ def ingest(
         console.print(f"[bold red]{exc}[/bold red]")
         raise typer.Exit(2)
 
-    plan = build_ingest_plan(pdf_paths, vault_library=vault_library)
-    dump_json_data(json_output, plan)
-    write_ingest_report(plan, report_path, applied=False)
-    if dry_run:
-        console.print(
-            f"Dry-run ingest planned {len(plan['items'])} PDFs. "
-            f"No files copied and no Zotero writes executed. Output: {json_output}, {report_path}."
+    started_at = time.monotonic()
+    network_enabled = not (no_network or offline_fast)
+    gemini_enabled = False
+    if not no_gemini and not dry_run and not offline_fast:
+        gemini_enabled = False
+    progress = ProgressEmitter(enabled=progress_jsonl)
+    if verbose and progress_jsonl:
+        progress.emit(
+            "debug",
+            "validate_files",
+            "Ingest configured.",
+            file_path=None,
+            file_index=None,
+            total_files=len(pdf_paths),
+            total_timeout_seconds=total_timeout_seconds,
+            network_timeout_seconds=network_timeout_seconds,
+            pdf_timeout_seconds=pdf_timeout_seconds,
+            llm_timeout_seconds=llm_timeout_seconds,
+            gemini_enabled=gemini_enabled,
+            network_enabled=network_enabled,
         )
+    plan = build_ingest_plan(
+        pdf_paths,
+        vault_library=vault_library,
+        progress=progress,
+        network_enabled=network_enabled,
+        network_timeout_seconds=network_timeout_seconds,
+    )
+    if time.monotonic() - started_at > total_timeout_seconds:
+        console.print("[bold red]Ingest exceeded total timeout before writing report.[/bold red]")
+        raise typer.Exit(124)
+    dump_json_data(json_output, plan)
+    with progress.stage(
+        "write_dry_run_report",
+        f"Writing ingest dry-run report to {report_path}",
+        file_path=None,
+        file_index=None,
+        total_files=len(pdf_paths),
+    ):
+        write_ingest_report(plan, report_path, applied=False)
+    if debug_trace:
+        trace = build_ingest_debug_trace(
+            plan,
+            gemini_enabled=gemini_enabled,
+            network_enabled=network_enabled,
+            zotero_write_enabled=apply,
+        )
+        if progress_jsonl:
+            progress.emit(
+                "debug_trace",
+                "write_dry_run_report",
+                "Debug trace generated.",
+                file_path=None,
+                file_index=None,
+                total_files=len(pdf_paths),
+                trace=trace,
+            )
+        else:
+            console.print_json(data=trace)
+    if dry_run:
+        progress.emit(
+            "done",
+            "done",
+            f"Dry-run ingest planned {len(plan['items'])} PDFs. No files copied and no Zotero writes executed.",
+            file_path=None,
+            file_index=None,
+            total_files=len(pdf_paths),
+        )
+        if not progress_jsonl:
+            console.print(
+                f"Dry-run ingest planned {len(plan['items'])} PDFs. "
+                f"No files copied and no Zotero writes executed. Output: {json_output}, {report_path}."
+            )
         return
 
     try:

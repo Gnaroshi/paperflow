@@ -725,8 +725,19 @@ final class AppState: ObservableObject {
             invalidDropWarnings = ["Drop at least one PDF first."]
             return
         }
-        let args = ["run", "paperflow", "ingest"] + droppedPDFs.map { $0.url.path } + ["--dry-run", "--storage-mode", "linked-local"]
-        runUV(arguments: args, timeoutSeconds: 1800)
+        runUV(arguments: ingestArguments(apply: false, offlineFast: false), timeoutSeconds: 120)
+    }
+
+    func runDryRunIngestOfflineFast() {
+        guard backend.ingestLinkedLocal else {
+            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            return
+        }
+        guard !droppedPDFs.isEmpty else {
+            invalidDropWarnings = ["Drop at least one PDF first."]
+            return
+        }
+        runUV(arguments: ingestArguments(apply: false, offlineFast: true), timeoutSeconds: 60)
     }
 
     func runApplyIngest() {
@@ -738,7 +749,7 @@ final class AppState: ObservableObject {
             invalidDropWarnings = ["Drop at least one PDF first."]
             return
         }
-        let args = ["run", "paperflow", "ingest"] + droppedPDFs.map { $0.url.path } + ["--apply", "--storage-mode", "linked-local"]
+        let args = ingestArguments(apply: true, offlineFast: false)
         runUV(arguments: args, timeoutSeconds: 1800, destructive: true)
     }
 
@@ -1118,7 +1129,28 @@ final class AppState: ObservableObject {
         if apiKeyStorageMode == .keychain && !geminiAPIKey.isEmpty {
             environment["GEMINI_API_KEY"] = geminiAPIKey
         }
+        environment["PYTHONUNBUFFERED"] = "1"
+        environment["PYTHONIOENCODING"] = "utf-8"
         return environment
+    }
+
+    private func ingestArguments(apply: Bool, offlineFast: Bool) -> [String] {
+        var args = ["run", "paperflow", "ingest"] + droppedPDFs.map { $0.url.path }
+        args += [
+            apply ? "--apply" : "--dry-run",
+            "--storage-mode", "linked-local",
+            "--progress-jsonl",
+            "--verbose",
+            "--total-timeout-seconds", apply ? "1800" : "60",
+            "--network-timeout-seconds", "10",
+            "--pdf-timeout-seconds", "20",
+            "--llm-timeout-seconds", "30",
+            "--no-gemini"
+        ]
+        if offlineFast {
+            args.append("--offline-fast")
+        }
+        return args
     }
 
     private func readJSON(_ url: URL) -> [String: Any]? {

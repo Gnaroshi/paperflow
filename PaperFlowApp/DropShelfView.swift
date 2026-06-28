@@ -223,17 +223,43 @@ struct DropShelfView: View {
 
     private var processingView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressTimeline()
+            ProgressTimeline(
+                currentStage: state.runner.currentStage,
+                completedStages: state.runner.completedStages
+            )
             TimelineView(.periodic(from: processingStartedAt ?? Date(), by: 1)) { context in
-                Text("Elapsed: \(elapsedLabel(now: context.date))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Text(state.runner.currentCommand.isEmpty ? "paperflow command is running" : state.runner.currentCommand)
-                .font(.system(.caption, design: .monospaced))
+                HStack(spacing: 10) {
+                    Text("Elapsed: \(elapsedLabel(now: context.date))")
+                    if let pid = state.runner.currentPID {
+                        Text("PID: \(pid)")
+                    }
+                    Text("Stage: \(stageLabel(state.runner.currentStage))")
+                }
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(state.runner.currentCommand.isEmpty ? "paperflow command is running" : state.runner.currentCommand)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(state.runner.currentWorkingDirectory)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !state.runner.lastHeartbeat.isEmpty {
+                    Text(state.runner.lastHeartbeat)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let warning = state.runner.noOutputWarning {
+                    Text(warning)
+                        .font(.caption)
+                        .foregroundStyle(state.runner.stalledWarning ? .red : .orange)
+                }
+            }
             Text(logTail(maxLines: 5).isEmpty ? "Waiting for command output..." : logTail(maxLines: 5))
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
@@ -241,6 +267,24 @@ struct DropShelfView: View {
                 .padding(8)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.8))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack {
+                Button("Open Debug Log") { state.runner.openLogFile() }
+                    .disabled(state.runner.currentLogFile == nil)
+                Button("Copy Log") { state.runner.copyOutput() }
+                    .disabled(state.runner.output.isEmpty)
+                Spacer()
+                if state.runner.stalledWarning {
+                    Button("Run offline-fast") {
+                        state.runner.cancel()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                            state.runDryRunIngestOfflineFast()
+                        }
+                    }
+                }
+                Button("Cancel") { state.runner.cancel() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .font(.caption)
         }
     }
 
@@ -288,12 +332,16 @@ struct DropShelfView: View {
                             .font(.caption)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text("Planned collections: set by Zotero Organize after ingest")
+                        Text("Planned collections: \(row.collections.isEmpty ? "not available" : row.collections.joined(separator: ", "))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("Planned tags: set by Zotero Organize after ingest")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("Planned tags: \(row.tags.isEmpty ? "not available" : row.tags.joined(separator: ", "))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
             }
@@ -303,6 +351,8 @@ struct DropShelfView: View {
     private struct IngestSummaryRow {
         let title: String
         let targetPath: String
+        let collections: [String]
+        let tags: [String]
     }
 
     private func latestIngestRows() -> [IngestSummaryRow] {
@@ -318,7 +368,9 @@ struct DropShelfView: View {
             }
             return IngestSummaryRow(
                 title: item["title"] as? String ?? URL(fileURLWithPath: target).deletingPathExtension().lastPathComponent,
-                targetPath: target
+                targetPath: target,
+                collections: item["target_collections"] as? [String] ?? [],
+                tags: item["normalized_tags"] as? [String] ?? []
             )
         }
     }
@@ -331,18 +383,38 @@ struct DropShelfView: View {
     }
 
     private func elapsedLabel(now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(processingStartedAt ?? now)))
+        let seconds = max(0, Int(state.runner.elapsedSeconds > 0 ? state.runner.elapsedSeconds : now.timeIntervalSince(processingStartedAt ?? now)))
         return "\(seconds / 60)m \(seconds % 60)s"
     }
 
     private struct ProgressTimeline: View {
+        let currentStage: String
+        let completedStages: Set<String>
+
+        private let stages = [
+            ("validate_files", "Validate"),
+            ("extract_first_page_text", "Text"),
+            ("extract_arxiv_id", "arXiv ID"),
+            ("fetch_arxiv_metadata", "Metadata"),
+            ("classify", "Classify"),
+            ("plan_filename", "Filename"),
+            ("write_dry_run_report", "Report")
+        ]
+
         var body: some View {
             HStack(spacing: 8) {
-                TimelineStep(label: "Queued", filled: true)
-                Rectangle().fill(Color.accentColor.opacity(0.5)).frame(height: 2)
-                TimelineStep(label: "Running", filled: true)
-                Rectangle().fill(Color.secondary.opacity(0.35)).frame(height: 2)
-                TimelineStep(label: "Report", filled: false)
+                ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+                    TimelineStep(
+                        label: stage.1,
+                        filled: completedStages.contains(stage.0) || currentStage == stage.0,
+                        active: currentStage == stage.0
+                    )
+                    if index < stages.count - 1 {
+                        Rectangle()
+                            .fill(completedStages.contains(stage.0) ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.25))
+                            .frame(height: 2)
+                    }
+                }
             }
         }
     }
@@ -350,16 +422,50 @@ struct DropShelfView: View {
     private struct TimelineStep: View {
         let label: String
         let filled: Bool
+        var active: Bool = false
 
         var body: some View {
             HStack(spacing: 4) {
                 Circle()
                     .fill(filled ? Color.accentColor : Color.secondary.opacity(0.3))
-                    .frame(width: 9, height: 9)
+                    .frame(width: active ? 11 : 9, height: active ? 11 : 9)
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(filled ? .primary : .secondary)
             }
+        }
+    }
+
+    private func stageLabel(_ stage: String) -> String {
+        switch stage {
+        case "validate_files":
+            return "validating files"
+        case "inspect_pdf":
+            return "inspecting PDF"
+        case "extract_filename_identifiers":
+            return "reading filename identifiers"
+        case "extract_first_page_text":
+            return "extracting first page text"
+        case "extract_arxiv_id":
+            return "extracting arXiv ID"
+        case "fetch_arxiv_metadata":
+            return "fetching arXiv metadata"
+        case "detect_doi":
+            return "detecting DOI"
+        case "fetch_doi_metadata":
+            return "fetching DOI metadata"
+        case "classify":
+            return "classifying"
+        case "plan_filename":
+            return "planning vault filename"
+        case "plan_zotero_actions":
+            return "planning Zotero actions"
+        case "write_dry_run_report":
+            return "writing report"
+        case "done":
+            return "done"
+        default:
+            return stage.isEmpty ? "starting" : stage
         }
     }
     private var dropTarget: some View {
