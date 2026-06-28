@@ -4,6 +4,8 @@ import ServiceManagement
 
 @MainActor
 final class AppState: ObservableObject {
+    private var suppressServiceCallbacks = true
+
     @Published var selectedSection: AppSection = .dashboard
     @Published var droppedPDFs: [DroppedPDF] = []
     @Published var invalidDropWarnings: [String] = []
@@ -19,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var dropShelfActivationMode: DropShelfActivationMode = .keyboardShortcutOnly {
         didSet {
             defaults.set(dropShelfActivationMode.rawValue, forKey: "dropShelfActivationMode")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
             AppServices.shared.shelfController?.applyActivationMode()
         }
@@ -29,6 +32,7 @@ final class AppState: ObservableObject {
     @Published var displayMode: DisplayMode = .focusedMonitor {
         didSet {
             defaults.set(displayMode.rawValue, forKey: "displayMode")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
@@ -38,36 +42,42 @@ final class AppState: ObservableObject {
     @Published var hotZoneEnabled = false {
         didSet {
             defaults.set(hotZoneEnabled, forKey: "hotZoneEnabled")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
     @Published var hotZoneEdge: HotZoneEdge = .right {
         didSet {
             defaults.set(hotZoneEdge.rawValue, forKey: "hotZoneEdge")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
     @Published var hotZoneCorner: HotZoneCorner = .bottomRight {
         didSet {
             defaults.set(hotZoneCorner.rawValue, forKey: "hotZoneCorner")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
     @Published var hotZoneWidth: Double = 12 {
         didSet {
             defaults.set(hotZoneWidth, forKey: "hotZoneWidth")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
     @Published var hotZoneHeight: Double = 160 {
         didSet {
             defaults.set(hotZoneHeight, forKey: "hotZoneHeight")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
     @Published var hotZoneIdleOpacity: Double = 0.12 {
         didSet {
             defaults.set(hotZoneIdleOpacity, forKey: "hotZoneIdleOpacity")
+            guard !suppressServiceCallbacks else { return }
             AppServices.shared.reconfigureHotZones()
         }
     }
@@ -270,6 +280,7 @@ final class AppState: ObservableObject {
 
         restoreZoteroVerification()
         refreshStatus()
+        suppressServiceCallbacks = false
     }
 
     var projectURL: URL {

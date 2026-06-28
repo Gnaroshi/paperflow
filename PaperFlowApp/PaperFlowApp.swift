@@ -66,7 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
             AppServices.shared.start()
+            AppServices.shared.openMainWindow()
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        Task { @MainActor in
+            AppServices.shared.openMainWindow()
+        }
+        return false
     }
 }
 
