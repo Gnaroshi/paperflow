@@ -6,24 +6,25 @@ final class DropShelfPanel: NSPanel {
     init(frame: NSRect) {
         super.init(
             contentRect: frame,
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        collectionBehavior = []
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         isMovableByWindowBackground = true
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
-        standardWindowButton(.closeButton)?.isHidden = true
-        standardWindowButton(.miniaturizeButton)?.isHidden = true
-        standardWindowButton(.zoomButton)?.isHidden = true
         ignoresMouseEvents = false
+    }
+
+    func updateCollectionBehavior(showAcrossSpaces: Bool) {
+        collectionBehavior = showAcrossSpaces
+            ? [.canJoinAllSpaces, .fullScreenAuxiliary]
+            : []
     }
 
     override var canBecomeKey: Bool {

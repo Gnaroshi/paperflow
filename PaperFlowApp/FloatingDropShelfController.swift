@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class FloatingDropShelfController: ObservableObject {
     @Published private(set) var isExpanded = false
+    @Published private(set) var visibilityState: PFWVisibilityState = .hidden
 
     private let state: AppState
     private let monitorManager: MultiMonitorManager
@@ -40,6 +41,7 @@ final class FloatingDropShelfController: ObservableObject {
                 frame: frame,
                 screen: screen,
                 opacity: state.hotZoneIdleOpacity,
+                showAcrossSpaces: state.showPFWAcrossSpaces,
                 dropController: self
             )
             window.orderFrontRegardless()
@@ -71,10 +73,11 @@ final class FloatingDropShelfController: ObservableObject {
     }
 
     func toggleShelf() {
-        if panel?.isVisible == true {
-            hideShelf()
-        } else {
+        switch visibilityState {
+        case .hidden, .hiding:
             showExpandedFromShortcut()
+        case .showing, .visible:
+            hideShelf()
         }
     }
 
@@ -94,12 +97,39 @@ final class FloatingDropShelfController: ObservableObject {
     }
 
     func hideShelf() {
-        guard state.dropShelfPhase != .processing else {
+        cancelAutoCollapse()
+        guard visibilityState != .hidden, visibilityState != .hiding else {
+            panel?.orderOut(nil)
+            auxiliaryPanels.forEach { $0.orderOut(nil) }
+            auxiliaryPanels.removeAll()
             return
         }
-        panel?.orderOut(nil)
-        auxiliaryPanels.forEach { $0.orderOut(nil) }
-        auxiliaryPanels.removeAll()
+        visibilityState = .hiding
+        let panels = ([panel].compactMap { $0 } + auxiliaryPanels).filter { $0.isVisible }
+        guard !panels.isEmpty else {
+            visibilityState = .hidden
+            return
+        }
+        for window in panels {
+            let screen = window.screen ?? NSScreen.main ?? monitorManager.cursorScreen()
+            var hiddenFrame = window.frame
+            hiddenFrame.origin.y = screen.visibleFrame.minY - hiddenFrame.height - 12
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                window.animator().setFrame(hiddenFrame, display: true)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+            Task { @MainActor in
+                guard self?.visibilityState == .hiding else {
+                    return
+                }
+                panels.forEach { $0.orderOut(nil) }
+                self?.auxiliaryPanels.removeAll()
+                self?.visibilityState = .hidden
+            }
+        }
     }
 
     func compactLeftClick(clickCount: Int) {
@@ -177,7 +207,7 @@ final class FloatingDropShelfController: ObservableObject {
     func simulateProcessingSuccess() {
         state.dropShelfPhase = .success
         state.shelfLastResult = "Simulated successful paperflow run."
-        scheduleAutoCollapse()
+        showExpanded()
     }
 
     func simulateProcessingFailure() {
@@ -189,15 +219,19 @@ final class FloatingDropShelfController: ObservableObject {
     func showOnAllScreens() {
         auxiliaryPanels.forEach { $0.orderOut(nil) }
         auxiliaryPanels.removeAll()
+        panel?.orderOut(nil)
         isExpanded = true
+        visibilityState = .showing
         for screen in NSScreen.screens {
             let frame = ScreenPlacementPolicy.shelfFrame(
                 on: screen,
                 expanded: true,
-                placement: state.dropShelfPlacement
+                placement: state.dropShelfPlacement,
+                phase: state.dropShelfPhase
             )
             let panel = DropShelfPanel(frame: frame)
             panel.dropController = self
+            panel.updateCollectionBehavior(showAcrossSpaces: state.showPFWAcrossSpaces)
             panel.contentView = NSHostingView(
                 rootView: DropShelfView(controller: self)
                     .environmentObject(state)
@@ -205,6 +239,12 @@ final class FloatingDropShelfController: ObservableObject {
             panel.orderFrontRegardless()
             auxiliaryPanels.append(panel)
         }
+        visibilityState = .visible
+    }
+
+    func refreshWindowBehaviors() {
+        panel?.updateCollectionBehavior(showAcrossSpaces: state.showPFWAcrossSpaces)
+        auxiliaryPanels.forEach { $0.updateCollectionBehavior(showAcrossSpaces: state.showPFWAcrossSpaces) }
     }
 
     func commandStarted() {
@@ -226,16 +266,29 @@ final class FloatingDropShelfController: ObservableObject {
     private func showPanel(expanded: Bool, on screen: NSScreen? = nil) {
         auxiliaryPanels.forEach { $0.orderOut(nil) }
         auxiliaryPanels.removeAll()
+        visibilityState = .showing
         let targetScreen = screen ?? monitorManager.targetScreens(for: state).first ?? monitorManager.focusedScreen(strategy: state.focusedMonitorStrategy)
         let frame = expanded
-            ? ScreenPlacementPolicy.shelfFrame(on: targetScreen, expanded: true, placement: state.dropShelfPlacement)
+            ? ScreenPlacementPolicy.shelfFrame(
+                on: targetScreen,
+                expanded: true,
+                placement: state.dropShelfPlacement,
+                phase: state.dropShelfPhase
+            )
             : ScreenPlacementPolicy.compactShelfFrame(on: targetScreen, placement: state.dropShelfPlacement)
         let panel = ensurePanel(frame: frame)
+        panel.updateCollectionBehavior(showAcrossSpaces: state.showPFWAcrossSpaces)
         if panel.isVisible {
             panel.setFrame(frame, display: true, animate: true)
+            visibilityState = .visible
         } else {
             let startFrame = expanded
-                ? ScreenPlacementPolicy.shelfHiddenStartFrame(on: targetScreen, expanded: true, placement: state.dropShelfPlacement)
+                ? ScreenPlacementPolicy.shelfHiddenStartFrame(
+                    on: targetScreen,
+                    expanded: true,
+                    placement: state.dropShelfPlacement,
+                    phase: state.dropShelfPhase
+                )
                 : frame
             panel.setFrame(startFrame, display: false)
         }
@@ -245,9 +298,14 @@ final class FloatingDropShelfController: ObservableObject {
                 context.duration = 0.22
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().setFrame(frame, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in
+                    self?.visibilityState = .visible
+                }
             }
         } else {
             panel.setFrame(frame, display: true, animate: false)
+            visibilityState = .visible
         }
     }
 

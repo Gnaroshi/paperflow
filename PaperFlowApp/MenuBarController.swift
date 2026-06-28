@@ -92,8 +92,6 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func debugShowShelfAllScreens() {
-        state.displayMode = .allMonitors
-        AppServices.shared.reconfigureHotZones()
         AppServices.shared.shelfController?.showOnAllScreens()
     }
 

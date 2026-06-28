@@ -113,14 +113,23 @@ def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeyp
     )
 
     item = plan["items"][0]
+    assert plan["schema_version"] == "1.0"
+    assert plan["mode"] == "dry-run"
     assert item["arxiv_id"] == "2606.18208v1"
     assert item["title"] == "Looped World Models"
     assert item["year"] == 2026
     assert item["abstract_found"] is True
+    assert item["abstract_present"] is True
     assert item["metadata_source"] == "pdf_first_page"
     assert Path(item["target_path"]).name == "2026 - Looped World Models [arXiv 2606.18208v1].pdf"
+    assert Path(item["planned_vault_path"]).name == "2026 - Looped World Models [arXiv 2606.18208v1].pdf"
     assert item["zotero_write_enabled"] is False
+    assert item["storage_mode"] == "linked-local"
+    assert item["upload_to_zotero_storage"] is False
+    assert item["zotero"]["operation"] == "create"
+    assert item["zotero"]["item_key"] is None
     assert "AI Library/20 Areas/World Models & Embodied AI" in item["target_collections"]
+    assert "AI Library/20 Areas/World Models & Embodied AI" in item["planned_collections"]
     assert "AI Library/20 Areas/Efficient ML" in item["target_collections"]
     assert "AI Library/20 Areas/Time-Series & Dynamical Systems" in item["target_collections"]
     assert "status/to-read" in item["normalized_tags"]
@@ -129,4 +138,6 @@ def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeyp
     assert "method/control" in item["normalized_tags"]
     assert "method/efficient-compute" in item["normalized_tags"]
     assert "source/arxiv" in item["normalized_tags"]
+    assert "method/efficient-compute" in item["planned_tags"]
+    assert "source/arxiv" in item["planned_tags"]
     assert any(event["event"] == "stage_started" for event in events)

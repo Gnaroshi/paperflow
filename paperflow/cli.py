@@ -356,6 +356,7 @@ def ingest(
         network_enabled=network_enabled,
         network_timeout_seconds=network_timeout_seconds,
     )
+    plan["mode"] = "apply" if apply else "dry-run"
     if time.monotonic() - started_at > total_timeout_seconds:
         console.print("[bold red]Ingest exceeded total timeout before writing report.[/bold red]")
         raise typer.Exit(124)

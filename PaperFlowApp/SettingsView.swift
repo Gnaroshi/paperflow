@@ -53,6 +53,7 @@ struct SettingsView: View {
                         Text(placement.label).tag(placement)
                     }
                 }
+                Toggle("Show PFW across Spaces", isOn: $state.showPFWAcrossSpaces)
                 Picker("Focused monitor strategy", selection: $state.focusedMonitorStrategy) {
                     ForEach(FocusedMonitorStrategy.allCases) { strategy in
                         Text(strategy.label).tag(strategy)

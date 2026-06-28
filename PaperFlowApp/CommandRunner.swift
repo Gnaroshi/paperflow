@@ -21,6 +21,9 @@ final class CommandRunner: ObservableObject {
     @Published private(set) var stalledWarning = false
     @Published private(set) var completedStages: Set<String> = []
     @Published private(set) var stageMessages: [String: String] = [:]
+    @Published private(set) var logicalDone = false
+    @Published private(set) var finalProgressMessage = ""
+    @Published private(set) var finalProgressElapsedMS: Int?
 
     private var process: Process?
     private var timeoutTask: DispatchWorkItem?
@@ -64,6 +67,9 @@ final class CommandRunner: ObservableObject {
         stalledWarning = false
         completedStages = []
         stageMessages = [:]
+        logicalDone = false
+        finalProgressMessage = ""
+        finalProgressElapsedMS = nil
         append("$ \(currentCommand)\n\n")
         append("Working directory: \(currentWorkingDirectory)\n")
         status = .running
@@ -241,9 +247,16 @@ final class CommandRunner: ObservableObject {
         case "heartbeat":
             lastHeartbeat = message
         case "done":
+            logicalDone = true
             completedStages.insert("done")
             currentStage = "done"
             lastHeartbeat = message
+            finalProgressMessage = message
+            if let elapsed = payload["elapsed_ms"] as? Int {
+                finalProgressElapsedMS = elapsed
+            } else if let elapsed = payload["elapsed_ms"] as? Double {
+                finalProgressElapsedMS = Int(elapsed)
+            }
         default:
             break
         }

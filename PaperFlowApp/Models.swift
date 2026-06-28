@@ -128,6 +128,53 @@ enum DropShelfPlacement: String, CaseIterable, Identifiable {
     }
 }
 
+enum PFWVisibilityState: String {
+    case hidden
+    case showing
+    case visible
+    case hiding
+}
+
+enum PFWMode: String, CaseIterable, Identifiable {
+    case drop
+    case status
+    case recent
+    case zotero
+    case logs
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .drop:
+            return "Drop"
+        case .status:
+            return "Status"
+        case .recent:
+            return "Recent"
+        case .zotero:
+            return "Zotero"
+        case .logs:
+            return "Logs"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .drop:
+            return "tray.and.arrow.down"
+        case .status:
+            return "gauge.with.dots.needle.67percent"
+        case .recent:
+            return "clock"
+        case .zotero:
+            return "books.vertical"
+        case .logs:
+            return "terminal"
+        }
+    }
+}
+
 enum FocusedMonitorStrategy: String, CaseIterable, Identifiable {
     case keyboardMainScreen
     case cursorScreen

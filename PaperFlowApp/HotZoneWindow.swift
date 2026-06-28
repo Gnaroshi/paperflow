@@ -8,6 +8,7 @@ final class HotZoneWindow: NSWindow {
         frame: NSRect,
         screen: NSScreen,
         opacity: Double,
+        showAcrossSpaces: Bool,
         dropController: FloatingDropShelfController
     ) {
         self.dropController = dropController
@@ -19,7 +20,7 @@ final class HotZoneWindow: NSWindow {
             defer: false
         )
         level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        collectionBehavior = showAcrossSpaces ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         ignoresMouseEvents = false
         isOpaque = false
         backgroundColor = .clear

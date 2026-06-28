@@ -7,6 +7,7 @@ struct DropShelfView: View {
     @ObservedObject var controller: FloatingDropShelfController
     @State private var applyConfirmation = ""
     @State private var processingStartedAt: Date?
+    @State private var mode: PFWMode = .drop
 
     var body: some View {
         Group {
@@ -21,10 +22,13 @@ struct DropShelfView: View {
             switch status {
             case .running:
                 processingStartedAt = Date()
+                mode = .drop
                 controller.commandStarted()
             case .succeeded:
+                mode = .drop
                 controller.commandFinished(success: true)
             case .failed, .timedOut, .cancelled:
+                mode = .drop
                 controller.commandFinished(success: false)
             case .idle:
                 break
@@ -59,78 +63,138 @@ struct DropShelfView: View {
     }
 
     private var expandedCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(state.dropShelfPhase.label)
-                        .font(.headline)
-                    Text(state.shelfLastResult)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            pfwHeader
+
+            Divider()
+                .opacity(0.18)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    contentForMode
                 }
-                Spacer()
-                Button {
-                    controller.hideShelf()
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.plain)
-                .disabled(state.dropShelfPhase == .processing)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .scrollIndicators(.automatic)
 
-            contentForPhase
+            Divider()
+                .opacity(0.18)
 
-            HStack {
-                Button {
-                    state.dropShelfAction = .dryRunIngest
-                    state.runDropShelfSelectedAction()
-                } label: {
-                    Label("Run Dry Run", systemImage: "play.circle")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(state.droppedPDFs.isEmpty || state.runner.isRunning || state.dropShelfPhase == .hoveringInvalidFile)
-
-                Button(role: .destructive) {
-                    state.dropShelfAction = .applyIngest
-                    state.runDropShelfSelectedAction()
-                } label: {
-                    Label("Apply", systemImage: "exclamationmark.triangle")
-                }
-                .disabled(
-                    state.droppedPDFs.isEmpty
-                    || state.runner.isRunning
-                    || applyConfirmation != ConfirmationKind.applyIngest.requiredText
-                    || !state.shelfStoreInLocalVault
-                    || !state.shelfLinkToZoteroNoUpload
-                )
-
-                Button("Open in Finder") {
-                    if !state.droppedPDFs.isEmpty {
-                        NSWorkspace.shared.activateFileViewerSelecting(state.droppedPDFs.map(\.url))
-                    }
-                }
-                .disabled(state.droppedPDFs.isEmpty)
-
-                Button("Clear") {
-                    state.clearPDFs()
-                    state.dropShelfPhase = .idleCompact
-                    state.shelfLastResult = "Ready"
-                    applyConfirmation = ""
-                }
-                .disabled(state.runner.isRunning)
-            }
+            pfwFooter
         }
-        .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(borderColor.opacity(dragHighlightActive ? 0.95 : 0.65), lineWidth: dragHighlightActive ? 2 : 1)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(borderColor.opacity(dragHighlightActive ? 0.95 : 0.35), lineWidth: dragHighlightActive ? 2 : 1)
         )
-        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.35 : 0.12), radius: dragHighlightActive ? 18 : 8)
+        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.35 : 0.18), radius: dragHighlightActive ? 22 : 16, x: 0, y: 10)
         .scaleEffect(dragHighlightActive ? 1.015 : 1)
         .animation(.easeOut(duration: 0.16), value: dragHighlightActive)
+    }
+
+    private var pfwHeader: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(state.dropShelfPhase.label)
+                    .font(.headline)
+                Text(state.shelfLastResult)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            Picker("PFW mode", selection: $mode) {
+                ForEach(PFWMode.allCases) { mode in
+                    Label(mode.label, systemImage: mode.symbolName).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 330)
+            Button {
+                controller.hideShelf()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .help("Hide PaperFlow Floating Window")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 1).onChanged { _ in })
+    }
+
+    @ViewBuilder
+    private var contentForMode: some View {
+        switch mode {
+        case .drop:
+            contentForPhase
+        case .status:
+            statusMiniDashboard
+        case .recent:
+            recentView
+        case .zotero:
+            zoteroMiniActions
+        case .logs:
+            logsMiniView
+        }
+    }
+
+    private var pfwFooter: some View {
+        HStack {
+            Button {
+                state.dropShelfAction = .dryRunIngest
+                state.runDropShelfSelectedAction()
+            } label: {
+                Label("Run Dry Run", systemImage: "play.circle")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(state.droppedPDFs.isEmpty || state.runner.isRunning || state.dropShelfPhase == .hoveringInvalidFile)
+
+            Button(role: .destructive) {
+                state.dropShelfAction = .applyIngest
+                state.runDropShelfSelectedAction()
+            } label: {
+                Label("Apply", systemImage: "exclamationmark.triangle")
+            }
+            .disabled(
+                state.droppedPDFs.isEmpty
+                || state.runner.isRunning
+                || applyConfirmation != ConfirmationKind.applyIngest.requiredText
+                || !state.shelfStoreInLocalVault
+                || !state.shelfLinkToZoteroNoUpload
+            )
+
+            Button("Open in Finder") {
+                if !state.droppedPDFs.isEmpty {
+                    NSWorkspace.shared.activateFileViewerSelecting(state.droppedPDFs.map(\.url))
+                }
+            }
+            .disabled(state.droppedPDFs.isEmpty)
+
+            Button("Clear") {
+                state.clearPDFs()
+                state.dropShelfPhase = .idleCompact
+                state.shelfLastResult = "Ready"
+                applyConfirmation = ""
+            }
+            .disabled(state.runner.isRunning)
+
+            Spacer()
+
+            Button("Hide PFW") {
+                controller.hideShelf()
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
     }
 
     @ViewBuilder
@@ -146,6 +210,7 @@ struct DropShelfView: View {
             dropTarget
             queuedFilesView
             warningsView
+            actionChoiceView
             safetyOptionsView
             if state.dropShelfAction == .applyIngest {
                 TextField("Type INGEST LOCAL PDFS", text: $applyConfirmation)
@@ -208,6 +273,187 @@ struct DropShelfView: View {
             Toggle("auto dry-run", isOn: $state.autoDryRunAfterDrop)
         }
         .font(.caption)
+    }
+
+    private var actionChoiceView: some View {
+        Picker("Target action", selection: $state.dropShelfAction) {
+            ForEach(DropShelfAction.allCases) { action in
+                Text(action.label).tag(action)
+            }
+        }
+        .pickerStyle(.segmented)
+        .font(.caption)
+    }
+
+    private var statusMiniDashboard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                MiniStatus(label: "Zotero", value: state.zoteroConnectionStatus)
+                MiniStatus(label: "Gemini", value: state.geminiConnectionStatus)
+            }
+            HStack {
+                MiniStatus(label: "Vault", value: state.vaultStatus.exists ? "Ready" : "Missing")
+                MiniStatus(label: "Last command", value: state.runner.status.label)
+            }
+            HStack {
+                MiniStatus(label: "Missing abstract", value: "\(state.dashboard.missingAbstractItems)")
+                MiniStatus(label: "Duplicates", value: "\(state.dashboard.duplicateCandidates)")
+            }
+            Text("Data sync and file sync are separate. Local linked PDFs should not consume Zotero Storage.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var recentView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ingestPlanSummary
+            HStack {
+                Button("Open Report") {
+                    NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+                }
+                Button("Open Vault") { state.openVault() }
+                Button("Open Reports") { state.openReportsFolder() }
+            }
+            .font(.caption)
+        }
+    }
+
+    private var zoteroMiniActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Zotero organization")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            Text("Apply Migration requires typed confirmation in the main window. It changes collections/tags only and should not delete notes, annotations, highlights, or attachments.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Backup") { state.runBackupZotero() }
+                Button("Plan Migration") { state.runPlanMigration() }
+                Button("Dry Run Migration") { state.runDryRunMigration() }
+                Button("Open Workbench") {
+                    AppServices.shared.openMainWindow(section: .cleanupWorkbench)
+                }
+            }
+            .font(.caption)
+            .disabled(state.runner.isRunning)
+        }
+    }
+
+    private var logsMiniView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(state.runner.currentCommand.isEmpty ? "No command running." : state.runner.currentCommand)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Copy") { state.runner.copyOutput() }
+                    .disabled(state.runner.output.isEmpty)
+                Button("Open Log") { state.runner.openLogFile() }
+                    .disabled(state.runner.currentLogFile == nil)
+            }
+            Text(logTail(maxLines: 12).isEmpty ? "No command output yet." : logTail(maxLines: 12))
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+                .padding(8)
+                .background(Color.white.opacity(0.46))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    private struct MiniStatus: View {
+        let label: String
+        let value: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.38))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var cardBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: theme.background,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Rectangle()
+                .fill(.regularMaterial)
+                .opacity(0.72)
+        }
+    }
+
+    private var theme: PFWTheme {
+        switch state.dropShelfPhase {
+        case .hoveringValidPDF:
+            return .validDrop
+        case .hoveringInvalidFile:
+            return .invalidDrop
+        case .processing:
+            return .processing
+        case .success:
+            return .success
+        case .failure:
+            return .failure
+        case .reviewNeeded:
+            return .warning
+        case .queued:
+            return .queued
+        case .idleCompact:
+            return .idle
+        }
+    }
+
+    private struct PFWTheme {
+        let background: [Color]
+        let border: Color
+
+        static let idle = PFWTheme(
+            background: [Color(red: 0.92, green: 0.94, blue: 0.98), Color(red: 0.98, green: 0.94, blue: 0.97)],
+            border: Color(red: 0.52, green: 0.58, blue: 0.68)
+        )
+        static let queued = PFWTheme(
+            background: [Color(red: 0.88, green: 0.94, blue: 1.0), Color(red: 0.95, green: 0.92, blue: 1.0)],
+            border: Color(red: 0.32, green: 0.48, blue: 0.88)
+        )
+        static let validDrop = PFWTheme(
+            background: [Color(red: 0.84, green: 0.98, blue: 0.92), Color(red: 0.86, green: 0.94, blue: 1.0)],
+            border: Color(red: 0.12, green: 0.66, blue: 0.64)
+        )
+        static let invalidDrop = PFWTheme(
+            background: [Color(red: 1.0, green: 0.90, blue: 0.84), Color(red: 1.0, green: 0.96, blue: 0.78)],
+            border: Color(red: 0.92, green: 0.32, blue: 0.24)
+        )
+        static let processing = PFWTheme(
+            background: [Color(red: 0.91, green: 0.90, blue: 1.0), Color(red: 0.86, green: 0.95, blue: 1.0)],
+            border: Color(red: 0.44, green: 0.44, blue: 0.92)
+        )
+        static let success = PFWTheme(
+            background: [Color(red: 0.84, green: 0.98, blue: 0.90), Color(red: 0.92, green: 0.98, blue: 0.86)],
+            border: Color(red: 0.12, green: 0.64, blue: 0.38)
+        )
+        static let failure = PFWTheme(
+            background: [Color(red: 1.0, green: 0.88, blue: 0.91), Color(red: 0.98, green: 0.90, blue: 0.96)],
+            border: Color(red: 0.86, green: 0.22, blue: 0.36)
+        )
+        static let warning = PFWTheme(
+            background: [Color(red: 1.0, green: 0.96, blue: 0.78), Color(red: 1.0, green: 0.90, blue: 0.78)],
+            border: Color(red: 0.86, green: 0.52, blue: 0.12)
+        )
     }
 
     private var processingView: some View {
@@ -281,15 +527,55 @@ struct DropShelfView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Image(systemName: success ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                    .foregroundStyle(success ? .green : .red)
-                Text(success ? "Command completed" : "Command failed")
+                    .foregroundStyle(success ? Color(red: 0.08, green: 0.56, blue: 0.32) : Color(red: 0.82, green: 0.16, blue: 0.28))
+                Text(success ? "Dry Run Complete" : "Command Failed")
                     .fontWeight(.semibold)
                 Spacer()
                 Button("Copy Log") { state.runner.copyOutput() }
                     .disabled(state.runner.output.isEmpty)
             }
             if success {
+                HStack(spacing: 12) {
+                    Text(elapsedResultLabel)
+                    Text("No files copied")
+                    Text("No Zotero writes executed")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if !state.runner.finalProgressMessage.isEmpty {
+                    Text(state.runner.finalProgressMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ingestPlanSummary
+                HStack {
+                    Button("Open ingest_report.md") {
+                        NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+                    }
+                    Button("Copy Summary") { copyIngestSummary() }
+                    Button("Open Vault") { state.openVault() }
+                    Button("Hide PFW") { controller.hideShelf() }
+                }
+                .font(.caption)
+                if !state.droppedPDFs.isEmpty {
+                    HStack {
+                        TextField("Type INGEST LOCAL PDFS to enable Apply Ingest", text: $applyConfirmation)
+                            .textFieldStyle(.roundedBorder)
+                        Button(role: .destructive) {
+                            state.dropShelfAction = .applyIngest
+                            state.runDropShelfSelectedAction()
+                        } label: {
+                            Label("Apply Ingest", systemImage: "exclamationmark.triangle")
+                        }
+                        .disabled(
+                            state.runner.isRunning
+                            || applyConfirmation != ConfirmationKind.applyIngest.requiredText
+                            || !state.shelfStoreInLocalVault
+                            || !state.shelfLinkToZoteroNoUpload
+                        )
+                    }
+                    .font(.caption)
+                }
             } else {
                 Text("Command: \(state.runner.currentCommand.isEmpty ? "paperflow" : state.runner.currentCommand)")
                     .font(.system(.caption, design: .monospaced))
@@ -313,14 +599,21 @@ struct DropShelfView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(rows.prefix(2), id: \.targetPath) { row in
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(row.title)
                             .font(.caption)
                             .fontWeight(.semibold)
-                        Text("Planned filename: \(URL(fileURLWithPath: row.targetPath).lastPathComponent)")
+                        Text("Source file: \(row.sourceFile)")
                             .font(.caption)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        Text("Planned vault path: \(row.targetPath)")
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("Storage: \(row.storageMode); upload to Zotero Storage: \(row.uploadToZoteroStorage ? "true" : "false")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text("Planned collections: \(row.collections.isEmpty ? "not available" : row.collections.joined(separator: ", "))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -331,17 +624,30 @@ struct DropShelfView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if let operation = row.zoteroOperation {
+                            Text("Planned Zotero item: \(operation). \(row.zoteroItemKey ?? "Not created yet - this was a dry run.")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .padding(10)
+                    .background(Color.white.opacity(0.38))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
     }
 
     private struct IngestSummaryRow {
+        let sourceFile: String
         let title: String
         let targetPath: String
+        let storageMode: String
+        let uploadToZoteroStorage: Bool
         let collections: [String]
         let tags: [String]
+        let zoteroOperation: String?
+        let zoteroItemKey: String?
     }
 
     private func latestIngestRows() -> [IngestSummaryRow] {
@@ -352,16 +658,44 @@ struct DropShelfView: View {
             return []
         }
         return items.compactMap { item in
-            guard let target = item["target_path"] as? String else {
+            guard let target = (item["planned_vault_path"] as? String) ?? (item["target_path"] as? String) else {
                 return nil
             }
+            let zotero = item["zotero"] as? [String: Any]
             return IngestSummaryRow(
+                sourceFile: (item["source_file"] as? String) ?? (item["source_path"] as? String) ?? "unknown",
                 title: item["title"] as? String ?? URL(fileURLWithPath: target).deletingPathExtension().lastPathComponent,
                 targetPath: target,
-                collections: item["target_collections"] as? [String] ?? [],
-                tags: item["normalized_tags"] as? [String] ?? []
+                storageMode: item["storage_mode"] as? String ?? "linked-local",
+                uploadToZoteroStorage: item["upload_to_zotero_storage"] as? Bool ?? false,
+                collections: (item["planned_collections"] as? [String]) ?? (item["target_collections"] as? [String]) ?? [],
+                tags: (item["planned_tags"] as? [String]) ?? (item["normalized_tags"] as? [String]) ?? [],
+                zoteroOperation: (zotero?["operation"] as? String) ?? (item["zotero_action"] as? String),
+                zoteroItemKey: zotero?["item_key"] as? String
             )
         }
+    }
+
+    private var elapsedResultLabel: String {
+        if let elapsed = state.runner.finalProgressElapsedMS {
+            return String(format: "Elapsed %.3fs", Double(elapsed) / 1000.0)
+        }
+        return String(format: "Elapsed %.1fs", state.runner.elapsedSeconds)
+    }
+
+    private func copyIngestSummary() {
+        let rows = latestIngestRows()
+        let summary = rows.map { row in
+            """
+            \(row.title)
+            Source: \(row.sourceFile)
+            Planned vault path: \(row.targetPath)
+            Collections: \(row.collections.joined(separator: ", "))
+            Tags: \(row.tags.joined(separator: ", "))
+            """
+        }.joined(separator: "\n\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary.isEmpty ? state.shelfLastResult : summary, forType: .string)
     }
 
     private func logTail(maxLines: Int) -> String {
@@ -515,18 +849,7 @@ struct DropShelfView: View {
     }
 
     private var borderColor: Color {
-        switch state.dropShelfPhase {
-        case .failure, .hoveringInvalidFile:
-            return .red
-        case .success:
-            return .green
-        case .hoveringValidPDF, .queued, .processing:
-            return .accentColor
-        case .reviewNeeded:
-            return .orange
-        case .idleCompact:
-            return .secondary
-        }
+        theme.border
     }
 
     fileprivate static func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {

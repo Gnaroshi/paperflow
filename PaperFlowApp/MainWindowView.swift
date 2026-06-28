@@ -4,15 +4,19 @@ struct MainWindowView: View {
     @EnvironmentObject private var state: AppState
     @State private var confirmation: ConfirmationKind?
     @State private var confirmationText = ""
+    @State private var sidebarCollapsed = false
 
     var body: some View {
-        NavigationSplitView {
-            List(AppSection.allCases, selection: $state.selectedSection) { section in
-                Label(section.rawValue, systemImage: section.symbolName)
-                    .tag(section)
-            }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 240)
-        } detail: {
+        HStack(spacing: 0) {
+            SidebarRailOrFullSidebar(
+                selectedSection: $state.selectedSection,
+                isCollapsed: $sidebarCollapsed
+            )
+            .frame(width: sidebarCollapsed ? 48 : 220)
+            .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
+
+            Divider()
+
             VStack(spacing: 0) {
                 HeaderView()
                 Divider()
@@ -124,6 +128,57 @@ struct MainWindowView: View {
     }
 }
 
+private struct SidebarRailOrFullSidebar: View {
+    @Binding var selectedSection: AppSection
+    @Binding var isCollapsed: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                isCollapsed.toggle()
+            } label: {
+                Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.left")
+                    .frame(width: 32, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help(isCollapsed ? "Expand sidebar" : "Collapse sidebar")
+            .padding(.top, 12)
+            .padding(.leading, 8)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(AppSection.allCases) { section in
+                        Button {
+                            selectedSection = section
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: section.symbolName)
+                                    .frame(width: 24)
+                                if !isCollapsed {
+                                    Text(section.rawValue)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                            .padding(.horizontal, isCollapsed ? 8 : 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(selectedSection == section ? Color.accentColor.opacity(0.14) : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(section.rawValue)
+                    }
+                }
+                .padding(.horizontal, isCollapsed ? 4 : 8)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
 struct HeaderView: View {
     @EnvironmentObject private var state: AppState
 
@@ -184,6 +239,7 @@ struct DropShelfSettingsView: View {
                     Text(placement.label).tag(placement)
                 }
             }
+            Toggle("Show PFW across Spaces", isOn: $state.showPFWAcrossSpaces)
             Picker("Focused monitor strategy", selection: $state.focusedMonitorStrategy) {
                 ForEach(FocusedMonitorStrategy.allCases) { strategy in
                     Text(strategy.label).tag(strategy)

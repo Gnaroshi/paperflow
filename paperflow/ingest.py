@@ -706,35 +706,50 @@ def build_ingest_plan(
             total_files=total_files,
         ):
             zotero_action = "create-or-update-parent-and-linked-attachment"
+            planned_zotero_operation = "create"
+        title = metadata.get("title") or source.stem
+        abstract_found = bool(metadata.get("abstract_found"))
         items.append(
             {
                 "source_path": str(source),
+                "source_file": str(source),
                 "source_exists": exists,
                 "source_size": source_size,
                 "source_sha256": sha256_file(source) if exists else None,
                 "first_mb_sha256": metadata.get("first_page_sha256"),
                 "target_path": str(target),
-                "title": metadata.get("title") or source.stem,
+                "planned_vault_path": str(target),
+                "title": title,
                 "year": metadata.get("year"),
                 "doi_normalized": metadata.get("doi_normalized"),
                 "arxiv_id": metadata.get("arxiv_id"),
                 "identifier": metadata.get("identifier") or source.stem,
                 "display_identifier": metadata.get("display_identifier") or metadata.get("identifier") or source.stem,
-                "abstract_found": bool(metadata.get("abstract_found")),
+                "abstract_found": abstract_found,
+                "abstract_present": abstract_found,
                 "metadata_source": metadata.get("metadata_source"),
                 "pdf_page_count": metadata.get("page_count"),
                 "target_collections": target_collections,
+                "planned_collections": target_collections,
                 "normalized_tags": normalized_tags,
+                "planned_tags": normalized_tags,
                 "classification_reasons": classification_reasons,
                 "gemini_enabled": False,
                 "network_enabled": network_enabled,
                 "zotero_write_enabled": False,
                 "zotero_action": zotero_action,
                 "storage_mode": StorageMode.LINKED_LOCAL.value,
+                "upload_to_zotero_storage": False,
+                "zotero": {
+                    "operation": planned_zotero_operation,
+                    "item_key": None,
+                    "open_uri": None,
+                },
             }
         )
     return {
         "schema_version": "1.0",
+        "mode": "dry-run",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "vault_library": str(vault_library.expanduser()),
         "items": items,

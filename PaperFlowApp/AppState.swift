@@ -26,7 +26,7 @@ final class AppState: ObservableObject {
             AppServices.shared.shelfController?.applyActivationMode()
         }
     }
-    @Published var dropShelfPlacement: DropShelfPlacement = .bottomCenter {
+    @Published var dropShelfPlacement: DropShelfPlacement = .bottomRight {
         didSet { defaults.set(dropShelfPlacement.rawValue, forKey: "dropShelfPlacement") }
     }
     @Published var displayMode: DisplayMode = .focusedMonitor {
@@ -38,6 +38,14 @@ final class AppState: ObservableObject {
     }
     @Published var focusedMonitorStrategy: FocusedMonitorStrategy = .cursorScreen {
         didSet { defaults.set(focusedMonitorStrategy.rawValue, forKey: "focusedMonitorStrategy") }
+    }
+    @Published var showPFWAcrossSpaces = false {
+        didSet {
+            defaults.set(showPFWAcrossSpaces, forKey: "showPFWAcrossSpaces")
+            guard !suppressServiceCallbacks else { return }
+            AppServices.shared.shelfController?.refreshWindowBehaviors()
+            AppServices.shared.reconfigureHotZones()
+        }
     }
     @Published var hotZoneEnabled = false {
         didSet {
@@ -84,7 +92,7 @@ final class AppState: ObservableObject {
     @Published var autoCollapseDelay: Double = 4 {
         didSet { defaults.set(autoCollapseDelay, forKey: "autoCollapseDelay") }
     }
-    @Published var autoHideAfterSuccess = true {
+    @Published var autoHideAfterSuccess = false {
         didSet { defaults.set(autoHideAfterSuccess, forKey: "autoHideAfterSuccess") }
     }
     @Published var autoDryRunAfterDrop = false {
@@ -276,6 +284,20 @@ final class AppState: ObservableObject {
         }
         if defaults.object(forKey: "autoDryRunAfterDrop") != nil {
             autoDryRunAfterDrop = defaults.bool(forKey: "autoDryRunAfterDrop")
+        }
+        if defaults.object(forKey: "showPFWAcrossSpaces") != nil {
+            showPFWAcrossSpaces = defaults.bool(forKey: "showPFWAcrossSpaces")
+        }
+
+        if defaults.bool(forKey: "pfwP0DefaultsApplied") == false {
+            dropShelfActivationMode = .keyboardShortcutOnly
+            dropShelfPlacement = .bottomRight
+            displayMode = .focusedMonitor
+            focusedMonitorStrategy = .cursorScreen
+            hotZoneEnabled = false
+            showPFWAcrossSpaces = false
+            autoHideAfterSuccess = false
+            defaults.set(true, forKey: "pfwP0DefaultsApplied")
         }
 
         restoreZoteroVerification()
