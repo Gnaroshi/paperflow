@@ -1,8 +1,9 @@
 # PaperFlow macOS App
 
 PaperFlow is a local-first macOS utility for the existing `paperflow` Python
-CLI. The primary UI is a persistent floating PDF drop shelf with screen-edge
-hot-zones, plus a Raycast-style command window and a full control-panel window.
+CLI. The primary PDF UI is a shortcut-triggered floating drop shelf with
+optional screen-edge hot-zones, plus a Raycast-style command window and a full
+control-panel window.
 The app does not classify papers or rewrite Zotero logic in Swift. It passes
 commands and paths to the CLI, parses local reports, and keeps apply operations
 behind typed confirmations.
@@ -89,8 +90,8 @@ uv run paperflow zotero migration-audit
 
 - Dashboard: project, Zotero, migration, cleanup, vault, duplicate, and metadata
   status from local files under `data/`.
-- Drop Shelf Settings: hot-zone placement, monitor mode, opacity, and collapse
-  timing.
+- Drop Shelf Settings: activation mode, shortcut, placement, monitor mode,
+  optional hot-zone, opacity, and collapse timing.
 - Zotero Organize: backup, enrich metadata, detect duplicates, plan migration,
   dry run, and confirmed apply migration.
 - Local Vault: vault status, initialization, and vault path planning.
@@ -109,10 +110,11 @@ uv run paperflow zotero migration-audit
 
 ## Drag and Drop
 
-Drag `.pdf` files toward the right edge near the bottom-right of the active
-screen. The hot-zone expands the floating shelf. Non-PDF files are rejected with
-a visible warning. Linked-local ingest copies PDFs into the local vault and
-creates Zotero linked attachment records:
+Press `Control + Shift + Command + Plus` (`⌃⇧⌘+`) to raise the drop shelf from
+the bottom center of the focused monitor. Drag `.pdf` files onto the shelf.
+Optional hot-zone activation can be enabled in Settings. Non-PDF files are
+rejected with a visible warning. Linked-local ingest copies PDFs into the local
+vault and creates Zotero linked attachment records:
 
 ```bash
 uv run paperflow ingest <pdf_paths> --dry-run --storage-mode linked-local
@@ -124,7 +126,7 @@ No PDF bytes are uploaded to Zotero Storage.
 Default shortcuts:
 
 - Option + Space: command window
-- Option + Shift + D: show/hide drop shelf
+- Control + Shift + Command + Plus: show/hide drop shelf
 - Option + Shift + I: Finder selection ingest placeholder
 
 ## Safety

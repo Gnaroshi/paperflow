@@ -4,9 +4,71 @@ enum ScreenPlacementPolicy {
     static let shelfMarginRight: CGFloat = 24
     static let shelfMarginBottom: CGFloat = 24
     static let compactShelfSize = NSSize(width: 150, height: 48)
-    static let expandedShelfSize = NSSize(width: 420, height: 430)
+    static let expandedShelfSize = NSSize(width: 520, height: 220)
 
-    static func shelfFrame(on screen: NSScreen, expanded: Bool) -> NSRect {
+    static func shelfFrame(on screen: NSScreen, expanded: Bool, placement: DropShelfPlacement = .bottomCenter) -> NSRect {
+        let visible = screen.visibleFrame
+        let size = expanded ? expandedShelfSize : compactShelfSize
+        switch placement {
+        case .bottomCenter:
+            return NSRect(
+                x: visible.midX - size.width / 2,
+                y: visible.minY + shelfMarginBottom,
+                width: size.width,
+                height: size.height
+            )
+        case .bottomRight:
+            return NSRect(
+                x: visible.maxX - size.width - shelfMarginRight,
+                y: visible.minY + shelfMarginBottom,
+                width: size.width,
+                height: size.height
+            )
+        case .rightEdge:
+            return NSRect(
+                x: visible.maxX - size.width - shelfMarginRight,
+                y: visible.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            )
+        case .custom:
+            return NSRect(
+                x: visible.midX - size.width / 2,
+                y: visible.minY + shelfMarginBottom,
+                width: size.width,
+                height: size.height
+            )
+        }
+    }
+
+    static func shelfHiddenStartFrame(on screen: NSScreen, expanded: Bool, placement: DropShelfPlacement = .bottomCenter) -> NSRect {
+        var frame = shelfFrame(on: screen, expanded: expanded, placement: placement)
+        frame.origin.y = screen.visibleFrame.minY - frame.height - 12
+        return frame
+    }
+
+    static func compactShelfFrame(on screen: NSScreen, placement: DropShelfPlacement = .bottomCenter) -> NSRect {
+        let visible = screen.visibleFrame
+        let size = compactShelfSize
+        switch placement {
+        case .bottomCenter:
+            return NSRect(
+                x: visible.midX - size.width / 2,
+                y: visible.minY + shelfMarginBottom,
+                width: size.width,
+                height: size.height
+            )
+        case .bottomRight, .rightEdge, .custom:
+            return NSRect(
+                x: visible.maxX - size.width - shelfMarginRight,
+                y: visible.minY + shelfMarginBottom,
+                width: size.width,
+                height: size.height
+            )
+        }
+    }
+
+    static func oldShelfFrame(on screen: NSScreen, expanded: Bool) -> NSRect {
         let visible = screen.visibleFrame
         let size = expanded ? expandedShelfSize : compactShelfSize
         return NSRect(

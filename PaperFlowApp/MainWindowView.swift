@@ -164,13 +164,24 @@ struct DropShelfSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionTitle("Drop Shelf Settings")
-            Text("The hot-zone is the activation surface for drag-and-drop. macOS does not deliver global drag events until the cursor enters one of PaperFlow's windows.")
+            Text("The shelf is hidden by default and appears with ⌃⇧⌘+. Hot-zones are optional because macOS does not deliver global drag events until the cursor enters one of PaperFlow's windows.")
                 .foregroundStyle(.secondary)
 
             Toggle("Enable hot-zone", isOn: $state.hotZoneEnabled)
-            Picker("Display mode", selection: $state.displayMode) {
+            Picker("Activation mode", selection: $state.dropShelfActivationMode) {
+                ForEach(DropShelfActivationMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            StatusLine(label: "Shortcut", value: state.dropShelfShortcut)
+            Picker("Show on", selection: $state.displayMode) {
                 ForEach(DisplayMode.allCases) { mode in
                     Text(mode.label).tag(mode)
+                }
+            }
+            Picker("Placement", selection: $state.dropShelfPlacement) {
+                ForEach(DropShelfPlacement.allCases) { placement in
+                    Text(placement.label).tag(placement)
                 }
             }
             Picker("Focused monitor strategy", selection: $state.focusedMonitorStrategy) {
@@ -198,6 +209,8 @@ struct DropShelfSettingsView: View {
             Text("Idle opacity: \(state.hotZoneIdleOpacity, specifier: "%.2f")")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Toggle("Auto-hide after successful dry-run/apply", isOn: $state.autoHideAfterSuccess)
+            Toggle("Auto dry-run after drop", isOn: $state.autoDryRunAfterDrop)
             Stepper("Auto-collapse delay: \(Int(state.autoCollapseDelay)) seconds", value: $state.autoCollapseDelay, in: 1...20, step: 1)
 
             HStack {

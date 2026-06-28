@@ -5,8 +5,9 @@ import Foundation
 final class GlobalHotkeyManager {
     private enum HotkeyID: UInt32 {
         case commandWindow = 1
-        case dropShelf = 2
+        case dropShelfEqual = 2
         case finderSelectionIngest = 3
+        case dropShelfKeypadPlus = 4
     }
 
     private var handlerRef: EventHandlerRef?
@@ -60,7 +61,8 @@ final class GlobalHotkeyManager {
         }
 
         registerKey(UInt32(kVK_Space), modifiers: UInt32(optionKey), id: .commandWindow)
-        registerKey(UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey | shiftKey), id: .dropShelf)
+        registerKey(UInt32(kVK_ANSI_Equal), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfEqual)
+        registerKey(UInt32(kVK_ANSI_KeypadPlus), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfKeypadPlus)
         registerKey(UInt32(kVK_ANSI_I), modifiers: UInt32(optionKey | shiftKey), id: .finderSelectionIngest)
     }
 
@@ -102,7 +104,7 @@ final class GlobalHotkeyManager {
         switch hotkey {
         case .commandWindow:
             AppServices.shared.commandPopupWindow?.toggle()
-        case .dropShelf:
+        case .dropShelfEqual, .dropShelfKeypadPlus:
             AppServices.shared.shelfController?.toggleShelf()
         case .finderSelectionIngest:
             state?.invalidDropWarnings = ["Finder selection ingest is planned but not implemented yet."]

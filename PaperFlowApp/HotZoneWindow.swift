@@ -92,6 +92,7 @@ private final class HotZoneContentView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         highlighted = true
+        dropController?.hotZoneHover(on: screen)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -102,7 +103,7 @@ private final class HotZoneContentView: NSView {
         highlighted = true
         let urls = Self.urls(from: sender)
         let valid = !urls.isEmpty && urls.allSatisfy { $0.pathExtension.lowercased() == "pdf" }
-        dropController?.dragHover(valid: valid, on: screen)
+        dropController?.dragHover(valid: valid, on: screen, fileCount: urls.count)
         return valid ? .copy : []
     }
 

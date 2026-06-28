@@ -16,6 +16,16 @@ final class AppState: ObservableObject {
     @Published var tagMode: TagMode = .replaceManaged {
         didSet { defaults.set(tagMode.rawValue, forKey: "tagMode") }
     }
+    @Published var dropShelfActivationMode: DropShelfActivationMode = .keyboardShortcutOnly {
+        didSet {
+            defaults.set(dropShelfActivationMode.rawValue, forKey: "dropShelfActivationMode")
+            AppServices.shared.reconfigureHotZones()
+            AppServices.shared.shelfController?.applyActivationMode()
+        }
+    }
+    @Published var dropShelfPlacement: DropShelfPlacement = .bottomCenter {
+        didSet { defaults.set(dropShelfPlacement.rawValue, forKey: "dropShelfPlacement") }
+    }
     @Published var displayMode: DisplayMode = .focusedMonitor {
         didSet {
             defaults.set(displayMode.rawValue, forKey: "displayMode")
@@ -25,7 +35,7 @@ final class AppState: ObservableObject {
     @Published var focusedMonitorStrategy: FocusedMonitorStrategy = .cursorScreen {
         didSet { defaults.set(focusedMonitorStrategy.rawValue, forKey: "focusedMonitorStrategy") }
     }
-    @Published var hotZoneEnabled = true {
+    @Published var hotZoneEnabled = false {
         didSet {
             defaults.set(hotZoneEnabled, forKey: "hotZoneEnabled")
             AppServices.shared.reconfigureHotZones()
@@ -64,6 +74,12 @@ final class AppState: ObservableObject {
     @Published var autoCollapseDelay: Double = 4 {
         didSet { defaults.set(autoCollapseDelay, forKey: "autoCollapseDelay") }
     }
+    @Published var autoHideAfterSuccess = true {
+        didSet { defaults.set(autoHideAfterSuccess, forKey: "autoHideAfterSuccess") }
+    }
+    @Published var autoDryRunAfterDrop = false {
+        didSet { defaults.set(autoDryRunAfterDrop, forKey: "autoDryRunAfterDrop") }
+    }
     @Published var apiKeyStorageMode: APIKeyStorageMode = .keychain {
         didSet { defaults.set(apiKeyStorageMode.rawValue, forKey: "apiKeyStorageMode") }
     }
@@ -74,6 +90,7 @@ final class AppState: ObservableObject {
         didSet { defaults.set(neverUploadPDFsToZoteroStorage, forKey: "neverUploadPDFsToZoteroStorage") }
     }
     @Published var globalShortcutCommand = "Option + Space"
+    @Published var dropShelfShortcut = "⌃⇧⌘+"
     @Published var dropShelfPhase: DropShelfPhase = .idleCompact
     @Published var dropShelfAction: DropShelfAction = .dryRunIngest
     @Published var shelfStoreInLocalVault = true
@@ -229,12 +246,26 @@ final class AppState: ObservableObject {
            let mode = APIKeyStorageMode(rawValue: value) {
             apiKeyStorageMode = mode
         }
+        if let value = defaults.string(forKey: "dropShelfActivationMode"),
+           let mode = DropShelfActivationMode(rawValue: value) {
+            dropShelfActivationMode = mode
+        }
+        if let value = defaults.string(forKey: "dropShelfPlacement"),
+           let placement = DropShelfPlacement(rawValue: value) {
+            dropShelfPlacement = placement
+        }
         if let value = defaults.string(forKey: "storageModeSetting"),
            let mode = StorageModeSetting(rawValue: value) {
             storageModeSetting = mode
         }
         if defaults.object(forKey: "neverUploadPDFsToZoteroStorage") != nil {
             neverUploadPDFsToZoteroStorage = defaults.bool(forKey: "neverUploadPDFsToZoteroStorage")
+        }
+        if defaults.object(forKey: "autoHideAfterSuccess") != nil {
+            autoHideAfterSuccess = defaults.bool(forKey: "autoHideAfterSuccess")
+        }
+        if defaults.object(forKey: "autoDryRunAfterDrop") != nil {
+            autoDryRunAfterDrop = defaults.bool(forKey: "autoDryRunAfterDrop")
         }
 
         restoreZoteroVerification()
@@ -412,6 +443,13 @@ final class AppState: ObservableObject {
     func removePDFs(at offsets: IndexSet) {
         for index in offsets.sorted(by: >) {
             droppedPDFs.remove(at: index)
+        }
+    }
+
+    func removePDF(_ pdf: DroppedPDF) {
+        droppedPDFs.removeAll { $0.id == pdf.id }
+        if droppedPDFs.isEmpty, dropShelfPhase != .processing {
+            dropShelfPhase = .idleCompact
         }
     }
 

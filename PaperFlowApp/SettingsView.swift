@@ -37,9 +37,20 @@ struct SettingsView: View {
             }
 
             Section("Drop Shelf") {
-                Picker("Display mode", selection: $state.displayMode) {
+                Picker("Activation mode", selection: $state.dropShelfActivationMode) {
+                    ForEach(DropShelfActivationMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                StatusLine(label: "Shortcut", value: state.dropShelfShortcut)
+                Picker("Show on", selection: $state.displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
                         Text(mode.label).tag(mode)
+                    }
+                }
+                Picker("Placement", selection: $state.dropShelfPlacement) {
+                    ForEach(DropShelfPlacement.allCases) { placement in
+                        Text(placement.label).tag(placement)
                     }
                 }
                 Picker("Focused monitor strategy", selection: $state.focusedMonitorStrategy) {
@@ -47,6 +58,9 @@ struct SettingsView: View {
                         Text(strategy.label).tag(strategy)
                     }
                 }
+                Toggle("Auto-hide after successful dry-run/apply", isOn: $state.autoHideAfterSuccess)
+                Stepper("Auto-hide after \(Int(state.autoCollapseDelay)) seconds idle", value: $state.autoCollapseDelay, in: 1...20, step: 1)
+                Toggle("Auto dry-run after drop", isOn: $state.autoDryRunAfterDrop)
                 Toggle("Enable hot-zone", isOn: $state.hotZoneEnabled)
                 Picker("Edge", selection: $state.hotZoneEdge) {
                     ForEach(HotZoneEdge.allCases) { edge in
@@ -63,13 +77,15 @@ struct SettingsView: View {
                 Slider(value: $state.hotZoneIdleOpacity, in: 0.02...0.60) {
                     Text("Idle opacity")
                 }
-                Stepper("Auto-collapse delay: \(Int(state.autoCollapseDelay)) seconds", value: $state.autoCollapseDelay, in: 1...20, step: 1)
+                Text("Hot-zone is inactive unless Activation mode is Hot-Zone on Hover.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Global Shortcuts") {
                 TextField("Command window shortcut", text: $state.globalShortcutCommand)
                     .disabled(true)
-                Text("Option + Shift + D: show/hide drop shelf")
+                StatusLine(label: "Drop shelf", value: state.dropShelfShortcut)
                 Text("Option + Shift + I: Finder selection ingest placeholder")
                     .foregroundStyle(.secondary)
                 Text("Custom shortcut capture UI is planned; defaults are active through Carbon hot keys.")

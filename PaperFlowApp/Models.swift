@@ -84,6 +84,50 @@ enum DisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum DropShelfActivationMode: String, CaseIterable, Identifiable {
+    case keyboardShortcutOnly
+    case hotZoneOnHover
+    case alwaysShowCompact
+    case menuBarOnly
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .keyboardShortcutOnly:
+            return "Keyboard Shortcut Only"
+        case .hotZoneOnHover:
+            return "Hot-Zone on Hover"
+        case .alwaysShowCompact:
+            return "Always Show Compact Shelf"
+        case .menuBarOnly:
+            return "Menu Bar Only"
+        }
+    }
+}
+
+enum DropShelfPlacement: String, CaseIterable, Identifiable {
+    case bottomCenter
+    case bottomRight
+    case rightEdge
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .bottomCenter:
+            return "Bottom Center"
+        case .bottomRight:
+            return "Bottom Right"
+        case .rightEdge:
+            return "Right Edge"
+        case .custom:
+            return "Custom"
+        }
+    }
+}
+
 enum FocusedMonitorStrategy: String, CaseIterable, Identifiable {
     case keyboardMainScreen
     case cursorScreen
@@ -172,7 +216,7 @@ enum DropShelfPhase: String {
         case .idleCompact:
             return "Drop PDFs"
         case .hoveringValidPDF:
-            return "Release to Queue PDFs"
+            return "Release to preview PDFs"
         case .hoveringInvalidFile:
             return "PDFs Only"
         case .queued:

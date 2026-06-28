@@ -30,8 +30,7 @@ final class AppServices {
         hotkeys.register(state: state)
         hotkeyManager = hotkeys
 
-        shelf.configureHotZones()
-        shelf.showCompact()
+        shelf.applyActivationMode()
     }
 
     func reconfigureHotZones() {
