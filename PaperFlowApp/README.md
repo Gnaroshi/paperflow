@@ -35,6 +35,7 @@ open dist/PaperFlow.app
 
 - `dist/PaperFlow.app`
 - `dist/PaperFlow.zip`
+- `dist/PaperFlow.dmg`
 
 For local Spotlight launch, install the app into `/Applications`:
 
@@ -44,8 +45,17 @@ For local Spotlight launch, install the app into `/Applications`:
 
 Then press `Command-Space`, type `PaperFlow`, and press Return.
 
-For GitHub download distribution, upload `dist/PaperFlow.zip` to a release. If
-Developer ID signing credentials are available:
+For GitHub download distribution, upload `dist/PaperFlow.zip` and
+`dist/PaperFlow.dmg` to a release. The DMG is the normal macOS
+drag-to-Applications download.
+
+Check whether this Mac is ready for Developer ID distribution:
+
+```bash
+./distribution_check.sh
+```
+
+If Developer ID signing credentials are available:
 
 ```bash
 DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" ./build_app.sh
