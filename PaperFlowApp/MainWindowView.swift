@@ -57,6 +57,8 @@ struct MainWindowView: View {
             ZoteroOrganizeView(confirm: showConfirmation)
         case .localVault:
             LocalVaultView()
+        case .localFolderImport:
+            LocalFolderImportView(confirm: showConfirmation)
         case .existingAttachments:
             ExistingAttachmentsView(confirm: showConfirmation)
         case .cleanupWorkbench:
@@ -116,6 +118,8 @@ struct MainWindowView: View {
             state.runApplyLocalizeAttachments()
         case .cleanupStoredAttachments:
             state.runCleanupStoredAttachments()
+        case .applyLocalImport:
+            state.runApplyLocalImport()
         case .applyAbstractRepairs:
             state.runApplyAbstractRepairs()
         case .applyMetadataRepairs:

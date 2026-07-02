@@ -42,6 +42,7 @@ let package = Package(
                 "DashboardView.swift",
                 "ZoteroOrganizeView.swift",
                 "LocalVaultView.swift",
+                "LocalFolderImportView.swift",
                 "ExistingAttachmentsView.swift",
                 "CleanupWorkbenchView.swift",
                 "ReportsView.swift",

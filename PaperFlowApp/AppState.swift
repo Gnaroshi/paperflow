@@ -190,6 +190,26 @@ final class AppState: ObservableObject {
             refreshVaultStatus()
         }
     }
+    @Published var localImportPath: String {
+        didSet { defaults.set(localImportPath, forKey: "localImportPath") }
+    }
+    @Published var localImportRecursive: Bool {
+        didSet { defaults.set(localImportRecursive, forKey: "localImportRecursive") }
+    }
+    @Published var localImportMaxDepth: String {
+        didSet { defaults.set(localImportMaxDepth, forKey: "localImportMaxDepth") }
+    }
+    @Published var localImportExcludeExistingZotero: Bool {
+        didSet { defaults.set(localImportExcludeExistingZotero, forKey: "localImportExcludeExistingZotero") }
+    }
+    @Published var localImportUseGemini: Bool {
+        didSet { defaults.set(localImportUseGemini, forKey: "localImportUseGemini") }
+    }
+    @Published var localImportStopOnGeminiQuota: Bool {
+        didSet { defaults.set(localImportStopOnGeminiQuota, forKey: "localImportStopOnGeminiQuota") }
+    }
+    @Published var localImportFilter: LocalImportFilter = .newOnly
+    @Published var localImportData = LocalImportData()
 
     let runner = CommandRunner()
     private let defaults = UserDefaults.standard
@@ -200,6 +220,12 @@ final class AppState: ObservableObject {
         projectPath = defaults.string(forKey: "projectPath") ?? defaultProject
         uvPath = defaults.string(forKey: "uvPath") ?? Self.defaultUVPath()
         vaultPath = defaults.string(forKey: "vaultPath") ?? defaultVault
+        localImportPath = defaults.string(forKey: "localImportPath") ?? ""
+        localImportRecursive = defaults.object(forKey: "localImportRecursive") as? Bool ?? true
+        localImportMaxDepth = defaults.string(forKey: "localImportMaxDepth") ?? ""
+        localImportExcludeExistingZotero = defaults.object(forKey: "localImportExcludeExistingZotero") as? Bool ?? true
+        localImportUseGemini = defaults.object(forKey: "localImportUseGemini") as? Bool ?? false
+        localImportStopOnGeminiQuota = defaults.object(forKey: "localImportStopOnGeminiQuota") as? Bool ?? true
         linkedAttachmentInstructionsShown = defaults.bool(forKey: "linkedAttachmentInstructionsShown")
         vaultStatus = VaultStatus(path: defaults.string(forKey: "vaultPath") ?? defaultVault)
         zoteroUserID = KeychainStore.read("ZOTERO_USER_ID")
@@ -362,6 +388,7 @@ final class AppState: ObservableObject {
         refreshDashboard()
         refreshVaultStatus()
         refreshGeminiUsage()
+        refreshLocalImportStatus()
     }
 
     func refreshDashboard() {
@@ -427,6 +454,10 @@ final class AppState: ObservableObject {
             geminiVerification.rateLimited = true
             geminiVerification.message = "Gemini Flash is currently rate-limited. Try later or reduce batch size."
         }
+    }
+
+    func refreshLocalImportStatus() {
+        localImportData = ReportParser.localImportData(dataURL: dataURL)
     }
 
     func refreshVaultStatus() {
@@ -524,6 +555,19 @@ final class AppState: ObservableObject {
         panel.directoryURL = vaultURL
         if panel.runModal() == .OK, let url = panel.url {
             vaultPath = url.path
+        }
+    }
+
+    func chooseLocalImportFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = localImportPath.isEmpty
+            ? projectURL
+            : URL(fileURLWithPath: NSString(string: localImportPath).expandingTildeInPath)
+        if panel.runModal() == .OK, let url = panel.url {
+            localImportPath = url.path
         }
     }
 
@@ -801,6 +845,61 @@ final class AppState: ObservableObject {
         runUV(arguments: ["run", "paperflow", "vault", "plan-paths"], timeoutSeconds: 600)
     }
 
+    func runLocalFolderScan() {
+        let path = localImportPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else {
+            invalidDropWarnings = ["Choose a folder or enter a terminal path first."]
+            return
+        }
+        var args = ["run", "paperflow", "local", "scan", path]
+        args.append(localImportRecursive ? "--recursive" : "--no-recursive")
+        if let depth = Int(localImportMaxDepth.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            args += ["--max-depth", String(depth)]
+        }
+        args.append("--progress-jsonl")
+        runUV(arguments: args, timeoutSeconds: 1800)
+    }
+
+    func runLocalFolderMatchZotero() {
+        if !localImportExcludeExistingZotero {
+            invalidDropWarnings = ["Exclude existing Zotero items is off. Matching is still safe and recommended before import."]
+        }
+        runUV(arguments: ["run", "paperflow", "local", "index-zotero"], timeoutSeconds: 1800)
+        runUV(arguments: ["run", "paperflow", "local", "match-zotero"], timeoutSeconds: 1800)
+    }
+
+    func runLocalFolderClassifyNew() {
+        var args = ["run", "paperflow", "local", "classify-new"]
+        if localImportUseGemini {
+            args += [
+                "--use-gemini",
+                "--gemini-model", selectedGeminiModel,
+                "--stop-on-gemini-quota", localImportStopOnGeminiQuota ? "true" : "false"
+            ]
+        }
+        runUV(arguments: args, timeoutSeconds: 3600)
+    }
+
+    func runLocalFolderPlanImport() {
+        runUV(arguments: ["run", "paperflow", "local", "plan-import"], timeoutSeconds: 1800)
+    }
+
+    func runApplyLocalImport() {
+        runUV(
+            arguments: [
+                "run", "paperflow", "local", "apply-import",
+                "--apply",
+                "--confirm", "IMPORT LOCAL PAPERS"
+            ],
+            timeoutSeconds: 7200,
+            destructive: true
+        )
+    }
+
+    func runLocalFolderAuditImport() {
+        runUV(arguments: ["run", "paperflow", "local", "audit-import"], timeoutSeconds: 1800)
+    }
+
     func runPlanLocalizeAttachments() {
         runZotero(arguments: ["plan-localize-attachments"], timeoutSeconds: 1800)
     }
@@ -986,6 +1085,28 @@ final class AppState: ObservableObject {
 
     func openVault() {
         NSWorkspace.shared.open(vaultURL)
+    }
+
+    func openLocalPDF(path: String) {
+        let expanded = NSString(string: path).expandingTildeInPath
+        guard !expanded.isEmpty else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: expanded))
+    }
+
+    func revealInFinder(path: String) {
+        let expanded = NSString(string: path).expandingTildeInPath
+        guard !expanded.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: expanded)])
+    }
+
+    func openZoteroItem(itemKey: String) {
+        let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty,
+              let url = URL(string: "zotero://select/library/items/\(key)") else {
+            invalidDropWarnings = ["No matched Zotero item key for this row."]
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     func openReport(_ relativePath: String) {

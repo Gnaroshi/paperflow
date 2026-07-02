@@ -1,0 +1,358 @@
+import SwiftUI
+
+struct LocalFolderImportView: View {
+    @EnvironmentObject private var state: AppState
+    let confirm: (ConfirmationKind) -> Void
+
+    @State private var selectedFilter: LocalImportFilter = .newOnly
+    @State private var manualActions: [String: String] = [:]
+    @State private var manualCollections: [String: String] = [:]
+    @State private var manualTags: [String: String] = [:]
+    @State private var detailRow: LocalImportRow?
+    @State private var editRow: LocalImportRow?
+    @State private var editMode: EditMode?
+    @State private var editText = ""
+
+    private enum EditMode {
+        case collection
+        case tags
+    }
+
+    private var filteredRows: [LocalImportRow] {
+        state.localImportData.rows.filter { row in
+            switch selectedFilter {
+            case .all:
+                return true
+            case .newOnly:
+                return row.status == "new" || effectiveAction(for: row) == "import" || row.action == "create"
+            case .alreadyInZotero:
+                return row.status == "exact_existing" || row.status == "likely_existing"
+            case .possibleDuplicates:
+                return row.status == "possible_existing" || row.status == "local_duplicate"
+            case .updateCandidates:
+                return row.status == "update_candidate" || effectiveAction(for: row) == "update existing"
+            case .reviewNeeded:
+                return row.action == "review"
+                    || row.tags.contains("status/review-needed")
+                    || row.primaryCollection.contains("/05 Review Queue/")
+                    || row.secondaryCollections.contains { $0.contains("/05 Review Queue/") }
+            case .lowConfidence:
+                return row.confidence > 0 && row.confidence < 0.55 || row.tags.contains("cleanup/low-confidence")
+            case .missingMetadata:
+                return row.metadataIssues.contains("missing-doi-or-arxiv")
+                    || row.tags.contains("cleanup/missing-metadata")
+                    || row.primaryCollection.contains("Missing Metadata")
+                    || row.secondaryCollections.contains { $0.contains("Missing Metadata") }
+            case .missingAbstract:
+                return !row.abstractPresent
+                    || row.tags.contains("cleanup/missing-abstract")
+                    || row.primaryCollection.contains("Missing Abstract")
+                    || row.secondaryCollections.contains { $0.contains("Missing Abstract") }
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionTitle("Local Folder Import")
+            Text("Recursively scan local PDFs, exclude papers already in Zotero, classify only new papers, then copy them into the local vault as linked-local Zotero attachments.")
+                .foregroundStyle(.secondary)
+
+            WarningBox(text: "Dry-run steps perform no file copies and no Zotero writes. Apply Import copies PDFs to the local vault and creates linked attachments only. Zotero Storage upload is always false.")
+
+            folderControls
+            settingsControls
+            workflowButtons
+            summaryGrid
+            filterControls
+            localEditNotice
+            resultsTable
+        }
+        .onAppear {
+            state.refreshLocalImportStatus()
+        }
+        .sheet(item: $detailRow) { row in
+            explanationSheet(row)
+        }
+        .sheet(item: $editRow) { row in
+            editSheet(row)
+        }
+    }
+
+    private var folderControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    state.chooseLocalImportFolder()
+                } label: {
+                    Label("Choose Folder", systemImage: "folder")
+                }
+                TextField("Terminal path", text: $state.localImportPath)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Button("Refresh Results") {
+                    state.refreshLocalImportStatus()
+                }
+            }
+            StatusLine(label: "Project", value: state.projectPath)
+        }
+    }
+
+    private var settingsControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 18) {
+                Toggle("Recursive", isOn: $state.localImportRecursive)
+                TextField("Max depth", text: $state.localImportMaxDepth)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 92)
+                Toggle("Exclude existing Zotero items", isOn: $state.localImportExcludeExistingZotero)
+                Toggle("Use Gemini for ambiguous classification", isOn: $state.localImportUseGemini)
+                Toggle("Stop on Gemini quota hit", isOn: $state.localImportStopOnGeminiQuota)
+            }
+            HStack(spacing: 18) {
+                StatusLine(label: "Storage mode", value: "linked-local")
+                StatusLine(label: "Zotero Storage upload", value: "false")
+                StatusLine(label: "Latest data", value: state.localImportData.generatedStatus)
+            }
+        }
+    }
+
+    private var workflowButtons: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
+                WorkflowButton(title: "Scan Folder", icon: "magnifyingglass") {
+                    state.runLocalFolderScan()
+                }
+                WorkflowButton(title: "Match Zotero", icon: "link") {
+                    state.runLocalFolderMatchZotero()
+                }
+                WorkflowButton(title: "Classify New Papers", icon: "sparkles") {
+                    state.runLocalFolderClassifyNew()
+                }
+                WorkflowButton(title: "Plan Import", icon: "list.bullet.rectangle") {
+                    state.runLocalFolderPlanImport()
+                }
+                WorkflowButton(title: "Audit Import", icon: "checkmark.seal") {
+                    state.runLocalFolderAuditImport()
+                }
+                Button(role: .destructive) {
+                    confirm(.applyLocalImport)
+                } label: {
+                    Label("Apply Import", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state.runner.isRunning)
+            }
+            Text("Match Zotero runs `local index-zotero` followed by `local match-zotero`. Apply Import requires typing `IMPORT LOCAL PAPERS`.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var summaryGrid: some View {
+        let summary = state.localImportData.summary
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+            InfoTile(title: "PDFs scanned", value: "\(summary.totalPDFsScanned)")
+            InfoTile(title: "Skipped files", value: "\(summary.skippedFiles)")
+            InfoTile(title: "Already in Zotero", value: "\(summary.alreadyInZotero)")
+            InfoTile(title: "Likely existing", value: "\(summary.likelyExisting)")
+            InfoTile(title: "Possible existing", value: "\(summary.possibleExisting)")
+            InfoTile(title: "Update candidates", value: "\(summary.updateCandidates)")
+            InfoTile(title: "New papers", value: "\(summary.newPapers)")
+            InfoTile(title: "Classified", value: "\(summary.classifiedPapers)")
+            InfoTile(title: "Review needed", value: "\(summary.reviewNeededPapers)")
+            InfoTile(title: "Planned imports", value: "\(summary.plannedImports)")
+            InfoTile(title: "Copied to vault", value: "\(summary.copiedToVault)")
+            InfoTile(title: "Linked attachments", value: "\(summary.zoteroLinkedAttachmentsCreated)")
+        }
+    }
+
+    private var filterControls: some View {
+        Picker("Filter", selection: $selectedFilter) {
+            ForEach(LocalImportFilter.allCases) { filter in
+                Text(filter.rawValue).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var localEditNotice: some View {
+        WarningBox(text: "Per-row edit/mark buttons are local UI review overrides for planning discussion. Backend row-edit persistence is not implemented yet; re-run plan commands before applying.")
+    }
+
+    private var resultsTable: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(filteredRows.count) rows")
+                .font(.headline)
+            ScrollView([.horizontal, .vertical]) {
+                VStack(alignment: .leading, spacing: 0) {
+                    tableHeader
+                    Divider()
+                    ForEach(filteredRows) { row in
+                        rowView(row)
+                        Divider()
+                    }
+                }
+                .frame(minWidth: 1780, alignment: .leading)
+            }
+            .frame(minHeight: 360)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
+        }
+    }
+
+    private var tableHeader: some View {
+        HStack(spacing: 0) {
+            headerCell("status", width: 120)
+            headerCell("title", width: 220)
+            headerCell("local path", width: 260)
+            headerCell("matched Zotero item", width: 150)
+            headerCell("match reason", width: 220)
+            headerCell("primary collection", width: 240)
+            headerCell("secondary collections", width: 260)
+            headerCell("tags", width: 260)
+            headerCell("confidence", width: 90)
+            headerCell("planned vault path", width: 260)
+            headerCell("action", width: 180)
+            headerCell("row actions", width: 500)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func rowView(_ row: LocalImportRow) -> some View {
+        HStack(spacing: 0) {
+            textCell(row.status, width: 120)
+            textCell(row.title, width: 220)
+            textCell(row.localPath, width: 260, monospaced: true)
+            textCell(row.matchedZoteroItem.isEmpty ? "-" : row.matchedZoteroItem, width: 150, monospaced: true)
+            textCell(row.matchReason, width: 220)
+            textCell(effectivePrimaryCollection(for: row), width: 240)
+            textCell(row.secondaryCollections.joined(separator: "; "), width: 260)
+            textCell(effectiveTags(for: row), width: 260)
+            textCell(row.confidence > 0 ? String(format: "%.2f", row.confidence) : "-", width: 90)
+            textCell(row.plannedVaultPath.isEmpty ? row.copiedFilePath : row.plannedVaultPath, width: 260, monospaced: true)
+            textCell(effectiveAction(for: row), width: 180)
+            actionCell(row, width: 500)
+        }
+    }
+
+    private func headerCell(_ text: String, width: CGFloat) -> some View {
+        Text(text)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(width: width, alignment: .leading)
+            .padding(8)
+    }
+
+    private func textCell(_ text: String, width: CGFloat, monospaced: Bool = false) -> some View {
+        Text(text.isEmpty ? "-" : text)
+            .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
+            .lineLimit(3)
+            .textSelection(.enabled)
+            .frame(width: width, alignment: .leading)
+            .padding(8)
+    }
+
+    private func actionCell(_ row: LocalImportRow, width: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            Button("Open") { state.openLocalPDF(path: row.localPath) }
+                .disabled(row.localPath.isEmpty)
+            Button("Reveal") { state.revealInFinder(path: row.localPath) }
+                .disabled(row.localPath.isEmpty)
+            Button("Zotero") { state.openZoteroItem(itemKey: row.matchedZoteroItem) }
+                .disabled(row.matchedZoteroItem.isEmpty)
+            Button("Explain") { detailRow = row }
+            Menu("Edit") {
+                Button("Edit target collection") {
+                    editMode = .collection
+                    editText = effectivePrimaryCollection(for: row)
+                    editRow = row
+                }
+                Button("Edit tags") {
+                    editMode = .tags
+                    editText = effectiveTags(for: row)
+                    editRow = row
+                }
+            }
+            Menu("Mark") {
+                Button("skip") { manualActions[row.id] = "skip" }
+                Button("import") { manualActions[row.id] = "import" }
+                Button("update existing") { manualActions[row.id] = "update existing" }
+                Button("review queue") { manualActions[row.id] = "review" }
+            }
+        }
+        .font(.caption)
+        .frame(width: width, alignment: .leading)
+        .padding(8)
+    }
+
+    private func explanationSheet(_ row: LocalImportRow) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(row.title)
+                .font(.title3)
+                .fontWeight(.semibold)
+            StatusLine(label: "Status", value: row.status)
+            StatusLine(label: "Match reason", value: row.matchReason.isEmpty ? "-" : row.matchReason)
+            StatusLine(label: "Primary collection", value: effectivePrimaryCollection(for: row))
+            StatusLine(label: "Tags", value: effectiveTags(for: row))
+            StatusLine(label: "Confidence", value: row.confidence > 0 ? String(format: "%.2f", row.confidence) : "-")
+            Text(row.rationale.isEmpty ? "No rationale was found in the current reports." : row.rationale)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            if !row.copiedFilePath.isEmpty || !row.zoteroItemKey.isEmpty || !row.linkedAttachmentStatus.isEmpty {
+                Divider()
+                StatusLine(label: "Copied file path", value: row.copiedFilePath.isEmpty ? "-" : row.copiedFilePath)
+                StatusLine(label: "Zotero item key", value: row.zoteroItemKey.isEmpty ? "-" : row.zoteroItemKey)
+                StatusLine(label: "Linked attachment", value: row.linkedAttachmentStatus.isEmpty ? "-" : row.linkedAttachmentStatus)
+            }
+            HStack {
+                Spacer()
+                Button("Close") { detailRow = nil }
+            }
+        }
+        .padding()
+        .frame(width: 620)
+    }
+
+    private func editSheet(_ row: LocalImportRow) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(editMode == .tags ? "Edit Tags" : "Edit Target Collection")
+                .font(.title3)
+                .fontWeight(.semibold)
+            Text("This is a local UI review override only; backend row-edit persistence is not implemented yet.")
+                .foregroundStyle(.secondary)
+            TextField("Value", text: $editText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3...6)
+            HStack {
+                Spacer()
+                Button("Cancel") { editRow = nil }
+                Button("Save Override") {
+                    if editMode == .tags {
+                        manualTags[row.id] = editText
+                    } else {
+                        manualCollections[row.id] = editText
+                    }
+                    editRow = nil
+                }
+            }
+        }
+        .padding()
+        .frame(width: 560)
+    }
+
+    private func effectiveAction(for row: LocalImportRow) -> String {
+        manualActions[row.id] ?? row.action
+    }
+
+    private func effectivePrimaryCollection(for row: LocalImportRow) -> String {
+        manualCollections[row.id] ?? row.primaryCollection
+    }
+
+    private func effectiveTags(for row: LocalImportRow) -> String {
+        manualTags[row.id] ?? row.tags.joined(separator: "; ")
+    }
+}

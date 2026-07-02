@@ -40,6 +40,143 @@ enum ReportParser {
         return numbers
     }
 
+    static func localImportData(dataURL: URL) -> LocalImportData {
+        var data = LocalImportData()
+        var rowsByPath: [String: LocalImportRow] = [:]
+
+        if let scan = readJSON(dataURL.appendingPathComponent("local_scan.json")),
+           let files = scan["files"] as? [[String: Any]] {
+            data.summary.totalPDFsScanned = files.count
+            data.summary.skippedFiles = files.filter { (string($0["scan_status"]) ?? "") != "ok" }.count
+            for file in files {
+                let path = string(file["path"]) ?? ""
+                let detected = file["detected"] as? [String: Any] ?? [:]
+                var row = rowsByPath[path] ?? LocalImportRow(localPath: path)
+                row.status = string(file["scan_status"]) ?? row.status
+                row.title = string(detected["title"]) ?? string(file["filename"]) ?? row.title
+                row.abstractPresent = bool(detected["abstract_present"])
+                rowsByPath[path] = row
+            }
+            data.generatedStatus = "local_scan.json"
+        }
+
+        if let matches = readJSON(dataURL.appendingPathComponent("local_zotero_match_plan.json")),
+           let matchRows = matches["matches"] as? [[String: Any]] {
+            for match in matchRows {
+                let path = string(match["local_path"]) ?? ""
+                var row = rowsByPath[path] ?? LocalImportRow(localPath: path)
+                let status = string(match["match_status"]) ?? ""
+                row.status = status
+                row.matchedZoteroItem = string(match["matched_zotero_item_key"]) ?? ""
+                row.zoteroItemKey = row.matchedZoteroItem
+                row.matchReason = string(match["match_reason"]) ?? ""
+                if let title = string(match["matched_zotero_title"]), !title.isEmpty, row.title == "(untitled)" {
+                    row.title = title
+                }
+                if status == "new" {
+                    row.action = "import"
+                } else if status == "possible_existing" {
+                    row.action = "review"
+                } else if status == "update_candidate" {
+                    row.action = "update existing"
+                } else if status == "local_duplicate" {
+                    row.action = "skip local duplicate"
+                } else if status == "exact_existing" || status == "likely_existing" {
+                    row.action = "skip existing"
+                }
+                rowsByPath[path] = row
+            }
+            data.summary.alreadyInZotero = matchRows.filter { string($0["match_status"]) == "exact_existing" }.count
+            data.summary.likelyExisting = matchRows.filter { string($0["match_status"]) == "likely_existing" }.count
+            data.summary.possibleExisting = matchRows.filter { string($0["match_status"]) == "possible_existing" }.count
+            data.summary.updateCandidates = matchRows.filter { string($0["match_status"]) == "update_candidate" }.count
+            data.summary.newPapers = matchRows.filter { string($0["match_status"]) == "new" }.count
+            data.generatedStatus = "local_zotero_match_plan.json"
+        }
+
+        if let classification = readJSON(dataURL.appendingPathComponent("local_classification_plan.json")),
+           let classifiedRows = classification["items"] as? [[String: Any]] {
+            data.summary.classifiedPapers = classifiedRows.count
+            for item in classifiedRows {
+                let path = string(item["local_path"]) ?? ""
+                var row = rowsByPath[path] ?? LocalImportRow(localPath: path)
+                row.title = string(item["title"]) ?? row.title
+                row.action = string(item["classification_action"]) ?? row.action
+                let collections = stringArray(item["target_collections"])
+                row.primaryCollection = collections.first ?? ""
+                row.secondaryCollections = Array(collections.dropFirst())
+                row.tags = stringArray(item["normalized_tags"])
+                row.confidence = double(item["confidence"]) ?? 0
+                row.metadataIssues = stringArray(item["metadata_issues"])
+                row.rationale = string(item["rationale"]) ?? ""
+                if row.status.isEmpty {
+                    row.status = row.action == "review" ? "review_needed" : "classified"
+                }
+                rowsByPath[path] = row
+            }
+            data.summary.reviewNeededPapers = classifiedRows.filter { item in
+                string(item["classification_action"]) == "review"
+                    || stringArray(item["normalized_tags"]).contains("status/review-needed")
+                    || stringArray(item["target_collections"]).contains { $0.contains("/05 Review Queue/") }
+            }.count
+            data.generatedStatus = "local_classification_plan.json"
+        }
+
+        if let importPlan = readJSON(dataURL.appendingPathComponent("local_import_plan.json")),
+           let importRows = importPlan["items"] as? [[String: Any]] {
+            data.summary.plannedImports = importRows.count
+            for item in importRows {
+                let path = string(item["source_path"]) ?? ""
+                var row = rowsByPath[path] ?? LocalImportRow(localPath: path)
+                row.plannedVaultPath = string(item["planned_vault_path"]) ?? ""
+                row.action = string(item["planned_zotero_operation"]) ?? row.action
+                let collections = stringArray(item["planned_collections"])
+                row.primaryCollection = collections.first ?? row.primaryCollection
+                row.secondaryCollections = Array(collections.dropFirst())
+                row.tags = stringArray(item["planned_tags"])
+                if let metadata = item["metadata"] as? [String: Any] {
+                    row.title = string(metadata["title"]) ?? row.title
+                    row.abstractPresent = bool(metadata["abstract_present"])
+                }
+                if let classification = item["classification"] as? [String: Any] {
+                    row.confidence = double(classification["confidence"]) ?? row.confidence
+                    row.rationale = string(classification["rationale"]) ?? row.rationale
+                }
+                rowsByPath[path] = row
+            }
+            data.generatedStatus = "local_import_plan.json"
+        }
+
+        if let applyURL = latestFile(dataURL: dataURL, prefix: "local_import_apply_log_", suffix: ".json"),
+           let applyLog = readJSON(applyURL) {
+            let events = applyLog["events"] as? [[String: Any]] ?? []
+            data.summary.copiedToVault = events.filter { string($0["event"]) == "pdf-copied-to-vault" }.count
+            data.summary.zoteroLinkedAttachmentsCreated = events.filter { string($0["event"]) == "linked-attachment-created" }.count
+            if let appliedRows = applyLog["items"] as? [[String: Any]] {
+                for item in appliedRows {
+                    let path = string(item["source_path"]) ?? ""
+                    var row = rowsByPath[path] ?? LocalImportRow(localPath: path)
+                    row.copiedFilePath = string(item["final_linked_pdf_path"]) ?? string(item["planned_vault_path"]) ?? ""
+                    row.linkedAttachmentStatus = actionStatus(item, name: "create_linked_attachment")
+                    if let zotero = item["zotero"] as? [String: Any] {
+                        row.zoteroItemKey = string(zotero["item_key"]) ?? row.zoteroItemKey
+                    }
+                    row.action = "applied"
+                    rowsByPath[path] = row
+                }
+            }
+            data.generatedStatus = applyURL.lastPathComponent
+        }
+
+        data.rows = rowsByPath.values.sorted { lhs, rhs in
+            if lhs.status == rhs.status {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.status < rhs.status
+        }
+        return data
+    }
+
     static func cleanupWorkbenchData(dataURL: URL) -> CleanupWorkbenchData {
         guard let migration = readJSON(dataURL.appendingPathComponent("migration_plan.json")),
               let migrationItems = migration["items"] as? [[String: Any]] else {
@@ -344,6 +481,14 @@ enum ReportParser {
             }
             return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         }
+    }
+
+    private static func actionStatus(_ item: [String: Any], name: String) -> String {
+        let actions = item["actions"] as? [[String: Any]] ?? []
+        guard let action = actions.first(where: { string($0["name"]) == name }) else {
+            return "not reported"
+        }
+        return bool(action["executed"]) ? "created" : "planned"
     }
 
     private static func stringArray(_ value: Any?) -> [String] {

@@ -5,6 +5,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case dropShelfSettings = "Drop Shelf Settings"
     case zoteroOrganize = "Zotero Organize"
     case localVault = "Local Vault"
+    case localFolderImport = "Local Folder Import"
     case existingAttachments = "Existing Attachments"
     case cleanupWorkbench = "Cleanup Workbench"
     case reports = "Reports"
@@ -23,6 +24,8 @@ enum AppSection: String, CaseIterable, Identifiable {
             return "books.vertical"
         case .localVault:
             return "externaldrive"
+        case .localFolderImport:
+            return "folder.badge.plus"
         case .existingAttachments:
             return "paperclip"
         case .cleanupWorkbench:
@@ -334,6 +337,7 @@ enum ConfirmationKind: Identifiable {
     case cleanupDeleteEmpty
     case localizeAttachments
     case cleanupStoredAttachments
+    case applyLocalImport
     case applyAbstractRepairs
     case applyMetadataRepairs
     case applySelectedAbstractRepair(String)
@@ -362,6 +366,8 @@ enum ConfirmationKind: Identifiable {
             return "Localize Zotero PDF Attachments"
         case .cleanupStoredAttachments:
             return "Delete Old Stored PDF Attachments"
+        case .applyLocalImport:
+            return "Import Local Papers"
         case .applyAbstractRepairs:
             return "Apply Abstract Repairs"
         case .applyMetadataRepairs:
@@ -385,6 +391,8 @@ enum ConfirmationKind: Identifiable {
             return "LOCALIZE ZOTERO PDF ATTACHMENTS"
         case .cleanupStoredAttachments:
             return "DELETE OLD STORED PDF ATTACHMENTS"
+        case .applyLocalImport:
+            return "IMPORT LOCAL PAPERS"
         case .applyAbstractRepairs:
             return "APPLY ABSTRACT REPAIRS"
         case .applyMetadataRepairs, .applySelectedMetadataRepair:
@@ -406,6 +414,8 @@ enum ConfirmationKind: Identifiable {
             return "This should convert stored Zotero PDFs into linked local attachments. Review the plan before applying."
         case .cleanupStoredAttachments:
             return "Do not run unless verify report succeeded. Never delete stored attachments that contain notes, annotations, or highlights unless explicitly reviewed."
+        case .applyLocalImport:
+            return "This copies PDFs into the local PaperFlow vault and creates Zotero linked-local attachments. It must not upload PDFs to Zotero Storage."
         case .applyAbstractRepairs:
             return "This updates Zotero abstractNote only for high-confidence repairs and should not overwrite existing abstracts unless backend options explicitly allow it."
         case .applyMetadataRepairs:
@@ -471,6 +481,62 @@ struct BackendCapability {
     var ingestLinkedLocal = false
     var vaultCommands = false
     var localizeAttachmentCommands = false
+}
+
+enum LocalImportFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case newOnly = "New only"
+    case alreadyInZotero = "Already in Zotero"
+    case possibleDuplicates = "Possible duplicates"
+    case updateCandidates = "Update candidates"
+    case reviewNeeded = "Review needed"
+    case lowConfidence = "Low confidence"
+    case missingMetadata = "Missing metadata"
+    case missingAbstract = "Missing abstract"
+
+    var id: String { rawValue }
+}
+
+struct LocalImportSummary {
+    var totalPDFsScanned = 0
+    var skippedFiles = 0
+    var alreadyInZotero = 0
+    var likelyExisting = 0
+    var possibleExisting = 0
+    var updateCandidates = 0
+    var newPapers = 0
+    var classifiedPapers = 0
+    var reviewNeededPapers = 0
+    var plannedImports = 0
+    var copiedToVault = 0
+    var zoteroLinkedAttachmentsCreated = 0
+}
+
+struct LocalImportRow: Identifiable, Hashable {
+    var id: String { localPath.isEmpty ? title : localPath }
+    var status = ""
+    var title = "(untitled)"
+    var localPath = ""
+    var matchedZoteroItem = ""
+    var matchReason = ""
+    var primaryCollection = ""
+    var secondaryCollections: [String] = []
+    var tags: [String] = []
+    var confidence = 0.0
+    var plannedVaultPath = ""
+    var action = ""
+    var metadataIssues: [String] = []
+    var abstractPresent = true
+    var zoteroItemKey = ""
+    var linkedAttachmentStatus = ""
+    var copiedFilePath = ""
+    var rationale = ""
+}
+
+struct LocalImportData {
+    var summary = LocalImportSummary()
+    var rows: [LocalImportRow] = []
+    var generatedStatus = "No local import data found"
 }
 
 struct ZoteroCredentialStatus {

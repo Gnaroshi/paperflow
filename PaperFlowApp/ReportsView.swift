@@ -31,6 +31,11 @@ struct ReportsView: View {
                 ReportButton(title: "Metadata Repair Report") { state.openReport("metadata_repair_report.md") }
                 ReportButton(title: "Duplicate Resolution Report") { state.openReport("duplicate_resolution_report.md") }
                 ReportButton(title: "Migration Audit") { state.openReport("migration_audit.md") }
+                ReportButton(title: "Local Scan Report") { state.openReport("local_scan_report.md") }
+                ReportButton(title: "Local Match Report") { state.openReport("local_zotero_match_report.md") }
+                ReportButton(title: "Local Classification Report") { state.openReport("local_classification_report.md") }
+                ReportButton(title: "Local Import Report") { state.openReport("local_import_report.md") }
+                ReportButton(title: "Local Import Audit") { state.openReport("local_import_audit.md") }
                 ReportButton(title: "Localize Attachments Report") { state.openReport("localize_attachments_report.md") }
                 ReportButton(title: "Localize Verify Report") { state.openReport("localize_verify_report.md") }
                 ReportButton(title: "Latest Apply Log") { state.openLatestApplyLog() }
