@@ -136,17 +136,17 @@ def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeyp
     assert item["upload_to_zotero_storage"] is False
     assert item["zotero"]["operation"] == "create"
     assert item["zotero"]["item_key"] is None
-    assert "AI Library/20 Areas/World Models & Embodied AI" in item["target_collections"]
-    assert "AI Library/20 Areas/World Models & Embodied AI" in item["planned_collections"]
-    assert "AI Library/20 Areas/Efficient ML" in item["target_collections"]
-    assert "AI Library/20 Areas/Time-Series & Dynamical Systems" in item["target_collections"]
+    assert "AI Library/20 Areas/World Models & Simulation/Latent World Models" in item["target_collections"]
+    assert "AI Library/20 Areas/World Models & Simulation/Latent World Models" in item["planned_collections"]
+    assert "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers" in item["target_collections"]
+    assert "AI Library/20 Areas/Efficient ML Systems/Parameter Sharing" in item["target_collections"]
     assert "status/to-read" in item["normalized_tags"]
     assert "method/world-model" in item["normalized_tags"]
     assert "method/transformer" in item["normalized_tags"]
-    assert "method/control" in item["normalized_tags"]
-    assert "method/efficient-compute" in item["normalized_tags"]
+    assert "method/looped-transformer" in item["normalized_tags"]
+    assert "method/parameter-sharing" in item["normalized_tags"]
     assert "source/arxiv" in item["normalized_tags"]
-    assert "method/efficient-compute" in item["planned_tags"]
+    assert "method/looped-transformer" in item["planned_tags"]
     assert "source/arxiv" in item["planned_tags"]
     assert item["classification"]["confidence"] > 0
     assert "world model" in item["classification"]["rationale"]
@@ -178,6 +178,7 @@ def test_explain_ingest_command_reads_structured_json(tmp_path: Path, monkeypatc
     assert result.exit_code == 0, result.output
     assert "Source:" in result.output
     assert "Planned vault path:" in result.output
-    assert "AI Library/20 Areas/World Models & Embodied AI" in result.output
+    assert "World Models & Simulation" in result.output
+    assert "Latent World Models" in result.output
     assert "status/to-read" in result.output
     assert "Zotero write executed: false" in result.output

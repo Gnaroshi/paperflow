@@ -113,26 +113,102 @@ def test_match_zotero_newer_arxiv_version_is_review_update_candidate() -> None:
 def test_taxonomy_v3_battery_paper_does_not_become_rag() -> None:
     row = {
         "filename": "battery_soh_prediction.pdf",
-        "detected": {"title": "Battery State of Health and RUL Prediction", "arxiv_id": None},
+        "detected": {"title": "Battery State of Health and RUL Prediction", "arxiv_id": None, "year": 2025},
         "first_pages_text": "battery degradation state of health SOH RUL cycle life prediction",
     }
 
     classification = classify_scan_row(row)
 
-    assert "AI Library/20 Areas/Battery ML/SOH & RUL Prognostics" in classification["target_collections"]
-    assert "AI Library/20 Areas/LLM/RAG & Retrieval" not in classification["target_collections"]
+    assert "AI Library/20 Areas/Battery ML & Prognostics/RUL & SOH Estimation" in classification["target_collections"]
+    assert "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval" not in classification["target_collections"]
 
 
 def test_taxonomy_v3_explicit_rag_only_when_retrieval_present() -> None:
     row = {
         "filename": "retrieval_augmented_generation.pdf",
-        "detected": {"title": "Retrieval-Augmented Generation with Dense Retrieval", "arxiv_id": None},
+        "detected": {
+            "title": "Retrieval-Augmented Generation with Dense Retrieval",
+            "arxiv_id": None,
+            "year": 2025,
+        },
         "first_pages_text": "retrieval augmented generation retriever passage retrieval query-document retrieval",
     }
 
     classification = classify_scan_row(row)
 
-    assert "AI Library/20 Areas/LLM/RAG & Retrieval" in classification["target_collections"]
+    assert "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval" in classification["target_collections"]
+
+
+def test_taxonomy_v3_representation_learning_does_not_become_rag() -> None:
+    row = {
+        "filename": "simclr.pdf",
+        "detected": {"title": "A Simple Framework for Contrastive Learning", "arxiv_id": None, "year": 2020},
+        "first_pages_text": "SimCLR contrastive learning self-supervised representation learning. References document retrieval.",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert "AI Library/20 Areas/Representation Learning/Contrastive Learning" in classification["target_collections"]
+    assert "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval" not in classification["target_collections"]
+
+
+def test_taxonomy_v3_looped_world_models_special_rule() -> None:
+    row = {
+        "filename": "2606.18208v1.pdf",
+        "detected": {
+            "title": "Looped World Models",
+            "arxiv_id": "2606.18208v1",
+            "year": 2026,
+            "abstract_present": True,
+        },
+        "first_pages_text": (
+            "arXiv:2606.18208v1 Looped World Models. "
+            "We introduce the first looped architectures for world modelling with parameter-shared transformers."
+        ),
+        "first_page_abstract_candidate": "We introduce the first looped architectures for world modelling with parameter sharing.",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert classification["target_collections"][:3] == [
+        "AI Library/20 Areas/World Models & Simulation/Latent World Models",
+        "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers",
+        "AI Library/20 Areas/Efficient ML Systems/Parameter Sharing",
+    ]
+    assert "area/world-models" in classification["normalized_tags"]
+    assert "method/looped-transformer" in classification["normalized_tags"]
+    assert "source/arxiv" in classification["normalized_tags"]
+
+
+def test_taxonomy_v3_low_confidence_uses_review_queue_not_inbox() -> None:
+    row = {
+        "filename": "unclear.pdf",
+        "detected": {"title": "A Miscellaneous Note", "year": 2024, "abstract_present": True},
+        "first_pages_text": "This note has no recognizable paper taxonomy evidence.",
+        "first_page_abstract_candidate": "This note has no recognizable paper taxonomy evidence but has enough text to count.",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert "AI Library/05 Review Queue/Ambiguous Classification" in classification["target_collections"]
+    assert "AI Library/00 Inbox" not in classification["target_collections"]
+    assert "cleanup/low-confidence" in classification["normalized_tags"]
+    assert classification["normalized_tags"][0] == "status/review-needed"
+
+
+def test_taxonomy_v3_missing_metadata_and_abstract_add_review_collections() -> None:
+    row = {
+        "filename": "unknown.pdf",
+        "detected": {"title": "", "arxiv_id": None, "doi": None, "year": None, "abstract_present": False},
+        "first_pages_text": "unknown paper",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert "AI Library/05 Review Queue/Missing Metadata" in classification["target_collections"]
+    assert "AI Library/05 Review Queue/Missing Abstract" in classification["target_collections"]
+    assert "cleanup/missing-metadata" in classification["normalized_tags"]
+    assert "cleanup/missing-abstract" in classification["normalized_tags"]
 
 
 def test_possible_existing_goes_to_review_queue_not_import() -> None:
@@ -160,7 +236,7 @@ def test_possible_existing_goes_to_review_queue_not_import() -> None:
     item = plan["items"][0]
 
     assert item["classification_action"] == "review"
-    assert "AI Library/05 Review Queue" in item["target_collections"]
+    assert "AI Library/05 Review Queue/Possible Zotero Duplicate" in item["target_collections"]
     assert "cleanup/possible-existing" in item["normalized_tags"]
 
 
@@ -178,7 +254,7 @@ def test_local_plan_import_uses_area_year_and_linked_local(tmp_path: Path) -> No
                 "sha256": "abcdef123456",
                 "sha256_first_1mb": "abcdef123456",
                 "abstract_present": True,
-                "target_collections": ["AI Library/20 Areas/Battery ML/SOH & RUL Prognostics"],
+                "target_collections": ["AI Library/20 Areas/Battery ML & Prognostics/RUL & SOH Estimation"],
                 "normalized_tags": ["status/to-read", "area/battery-ml", "type/method"],
                 "confidence": 0.8,
                 "rationale": "battery prognostics signal",
@@ -192,6 +268,6 @@ def test_local_plan_import_uses_area_year_and_linked_local(tmp_path: Path) -> No
 
     assert plan["mode"] == "dry-run"
     assert plan["upload_to_zotero_storage"] is False
-    assert "/Battery ML - SOH & RUL Prognostics/2025/" in item["planned_vault_path"]
+    assert "/Battery ML & Prognostics - RUL & SOH Estimation/2025/" in item["planned_vault_path"]
     assert item["planned_filename"].endswith("[arXiv 2501.12345v1].pdf")
     assert "paperflow/source-local-import" in item["planned_tags"]

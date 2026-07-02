@@ -1716,7 +1716,7 @@ def explain_ingest_command(
     except Exception as exc:
         console.print(f"[bold red]Could not read ingest JSON: {exc}[/bold red]")
         raise typer.Exit(2)
-    console.print(explain_ingest_plan(payload))
+    console.print(explain_ingest_plan(payload), soft_wrap=True)
 
 
 @zotero_app.command("rollback")

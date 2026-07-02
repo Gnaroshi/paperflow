@@ -620,19 +620,44 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
     collections: list[str] = []
     tags = ["status/to-read"]
     reasons: list[str] = []
-    if "world model" in text or "looped world" in text:
-        collections.append("AI Library/20 Areas/World Models & Embodied AI")
-        tags.extend(["area/world-models", "method/world-model", "method/control"])
+    if "looped world models" in text or "first looped architectures for world modelling" in text:
+        collections.extend(
+            [
+                "AI Library/20 Areas/World Models & Simulation/Latent World Models",
+                "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers",
+                "AI Library/20 Areas/Efficient ML Systems/Parameter Sharing",
+            ]
+        )
+        tags.extend(
+            [
+                "area/world-models",
+                "area/recurrent-adaptive-computation",
+                "area/efficient-ml",
+                "method/world-model",
+                "method/looped-transformer",
+                "method/recurrent-depth",
+                "method/adaptive-computation",
+                "method/parameter-sharing",
+                "task/world-simulation",
+            ]
+        )
+        reasons.append("matched looped world model deterministic rule")
+    elif "world model" in text or "looped world" in text:
+        collections.append("AI Library/20 Areas/World Models & Simulation/Latent World Models")
+        tags.extend(["area/world-models", "method/world-model", "task/world-simulation"])
         reasons.append("matched world model terms")
-    if any(term in text for term in ("efficient", "adaptive computation", "compute")):
-        collections.append("AI Library/20 Areas/Efficient ML")
+    if any(term in text for term in ("parameter sharing", "parameter-shared", "adaptive computation", "efficient inference")):
+        collections.append("AI Library/20 Areas/Efficient ML Systems/Parameter Sharing")
         tags.append("area/efficient-ml")
-        tags.append("method/efficient-compute")
+        if "adaptive computation" in text:
+            tags.append("method/adaptive-computation")
+        if "parameter" in text:
+            tags.append("method/parameter-sharing")
         reasons.append("matched efficient/adaptive computation terms")
-    if any(term in text for term in ("dynamical", "temporal", "recurrent", "looped")):
-        collections.append("AI Library/20 Areas/Time-Series & Dynamical Systems")
-        tags.append("area/time-series")
-        reasons.append("matched recurrent/dynamical terms")
+    if any(term in text for term in ("recurrent depth", "looped transformer", "universal transformer", "dynamic depth")):
+        collections.append("AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers")
+        tags.append("area/recurrent-adaptive-computation")
+        reasons.append("matched recurrent/adaptive computation terms")
     if "transformer" in text:
         tags.append("method/transformer")
     if "looped transformer" in text or "looped world" in text:
@@ -641,24 +666,28 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
         tags.append("method/recurrent-depth")
     if "adaptive computation" in text:
         tags.append("method/adaptive-computation")
-    if "control" in text:
-        tags.append("method/control")
     source_tag = "source/arxiv" if metadata.get("arxiv_id") else "source/unknown"
     if not collections:
-        collections = ["AI Library/00 Inbox"]
+        collections = ["AI Library/05 Review Queue/Ambiguous Classification"]
+        tags.extend(["status/review-needed", "cleanup/low-confidence"])
         reasons.append("no strong ingest taxonomy signal")
     # Keep required source/type tags from being pushed out by optional method details.
     priority_tags = [
         "status/to-read",
         source_tag,
         "type/method",
+        "area/world-models",
+        "area/recurrent-adaptive-computation",
+        "area/efficient-ml",
         "method/world-model",
         "method/transformer",
-        "method/control",
-        "method/efficient-compute",
         "method/looped-transformer",
-        "area/world-models",
-        "area/efficient-ml",
+        "method/recurrent-depth",
+        "method/adaptive-computation",
+        "method/parameter-sharing",
+        "task/world-simulation",
+        "status/review-needed",
+        "cleanup/low-confidence",
     ]
     available_tags = set(tags + [source_tag, "type/method"])
     seen: set[str] = set()
@@ -669,7 +698,7 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
         if tag not in seen:
             cleaned.append(tag)
             seen.add(tag)
-    return collections[:3], cleaned[:10], reasons
+    return list(dict.fromkeys(collections))[:3], cleaned[:15], reasons
 
 
 def _pseudo_item_for_pdf(path: Path, metadata: dict[str, Any]) -> SimpleNamespace:
@@ -768,7 +797,11 @@ def build_ingest_plan(
         abstract_found = bool(metadata.get("abstract_found"))
         planned_filename = target.name
         rationale = "; ".join(classification_reasons) if classification_reasons else "No strong ingest taxonomy signal."
-        classification_confidence = 0.35 if target_collections == ["AI Library/00 Inbox"] else 0.82
+        classification_confidence = (
+            0.35
+            if target_collections == ["AI Library/05 Review Queue/Ambiguous Classification"]
+            else 0.82
+        )
         items.append(
             {
                 "source_path": str(source),

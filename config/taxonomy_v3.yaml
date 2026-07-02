@@ -1,0 +1,309 @@
+schema_version: "3.0"
+name: "PaperFlow Taxonomy v3"
+
+principles:
+  - Collections represent where the paper belongs intellectually.
+  - Tags represent methods, tasks, status, source, modality, and cleanup state.
+  - Do not overload Datasets & Benchmarks.
+  - Do not classify as RAG unless explicit retrieval is present.
+  - Do not classify as VLM just because the paper contains "vision" and "language" in references.
+  - If uncertain, use Review Queue with reasons.
+
+assignment_policy:
+  max_collection_depth: 4
+  primary_area_collections_per_paper: 1
+  secondary_area_or_resource_collections_per_paper:
+    min: 0
+    max: 2
+  tags_per_paper:
+    min: 5
+    max: 15
+  uncertain_collection: "AI Library/05 Review Queue"
+
+classification_guards:
+  rag:
+    require_explicit_retrieval_signal: true
+    positive_signals:
+      - retrieval-augmented generation
+      - retrieval augmented generation
+      - RAG
+      - retriever
+      - document retrieval
+      - passage retrieval
+      - dense retrieval
+      - indexing
+      - knowledge-base retrieval
+      - citation-grounded generation
+      - query-document retrieval
+    negative_rule: "Do not classify representation learning, robotics prediction, battery prediction, graph learning, or VLM prompt learning as RAG unless explicit retrieval is present."
+  vlm:
+    require_core_topic_signal: true
+    negative_rule: "Do not classify as VLM just because vision-language terms appear only in references or related work."
+  datasets_and_benchmarks:
+    negative_rule: "Use Datasets or Benchmarks only when the paper's primary contribution is a dataset, benchmark, evaluation suite, or protocol."
+  review_queue:
+    use_when:
+      - ambiguous classification
+      - possible Zotero duplicate
+      - new arXiv version
+      - missing metadata
+      - missing abstract
+      - needs manual approval
+
+collections:
+  - name: "AI Library"
+    children:
+      - name: "00 Inbox"
+      - name: "05 Review Queue"
+        children:
+          - name: "Ambiguous Classification"
+          - name: "Possible Zotero Duplicate"
+          - name: "New arXiv Version"
+          - name: "Missing Metadata"
+          - name: "Missing Abstract"
+          - name: "Needs Manual Approval"
+      - name: "10 Active Reading"
+      - name: "20 Areas"
+        children:
+          - name: "LLMs & Reasoning"
+            children:
+              - name: "Prompting & In-Context Learning"
+              - name: "Chain-of-Thought & Latent Reasoning"
+              - name: "Alignment & Safety"
+              - name: "Hallucination & Factuality"
+              - name: "Jailbreaks & Security"
+              - name: "Efficient LLM Inference"
+              - name: "KV Cache & Compression"
+              - name: "Distillation & Small LMs"
+              - name: "RAG & Retrieval"
+          - name: "Vision-Language Models"
+            children:
+              - name: "CLIP-style Representation"
+              - name: "Prompt Learning & Adapters"
+              - name: "Multimodal Reasoning"
+              - name: "VLM Evaluation"
+              - name: "Medical VLMs"
+              - name: "VLM Safety & Robustness"
+          - name: "Vision-Language-Action & Robotics"
+            children:
+              - name: "Generalist Robot Policies"
+              - name: "Robot Manipulation"
+              - name: "Imitation Learning"
+              - name: "Inverse Dynamics & Action Models"
+              - name: "Motion Tokenization"
+              - name: "Robot Benchmarks"
+              - name: "Embodied Agents"
+          - name: "World Models & Simulation"
+            children:
+              - name: "Latent World Models"
+              - name: "Video World Models"
+              - name: "Model-Based RL"
+              - name: "Planning with Learned Models"
+              - name: "Deferred Decoding"
+              - name: "Long-Horizon Rollouts"
+              - name: "Interactive Environment Models"
+          - name: "Recurrent & Adaptive Computation"
+            children:
+              - name: "Looped Transformers"
+              - name: "Recurrent-Depth Models"
+              - name: "Adaptive Computation Time"
+              - name: "Early Exit"
+              - name: "Universal Transformers"
+              - name: "Dynamic Depth"
+          - name: "Efficient ML Systems"
+            children:
+              - name: "Efficient Architectures"
+              - name: "Model Compression"
+              - name: "Distillation"
+              - name: "Parameter Sharing"
+              - name: "Inference Acceleration"
+              - name: "Edge Deployment"
+          - name: "Computer Vision"
+            children:
+              - name: "CNN Architectures"
+              - name: "Vision Transformers"
+              - name: "State Space Vision Models"
+              - name: "Object Detection"
+              - name: "Segmentation"
+              - name: "Tracking & Correspondence"
+              - name: "Scene Flow & 3D Vision"
+              - name: "Image Classification"
+              - name: "Explainability & Attribution"
+          - name: "Representation Learning"
+            children:
+              - name: "Self-Supervised Learning"
+              - name: "Contrastive Learning"
+              - name: "Semi-Supervised Learning"
+              - name: "Data Augmentation"
+              - name: "Transfer Learning"
+              - name: "Foundation Representations"
+          - name: "Anomaly & Defect Detection"
+            children:
+              - name: "Industrial Anomaly Detection"
+              - name: "Visual Defect Inspection"
+              - name: "Zero-Shot Anomaly Detection"
+              - name: "Anomaly Segmentation"
+              - name: "Video Anomaly Detection"
+              - name: "Time-Series Anomaly Detection"
+          - name: "Battery ML & Prognostics"
+            children:
+              - name: "Battery Life Prediction"
+              - name: "RUL & SOH Estimation"
+              - name: "Degradation Modeling"
+              - name: "Fast Charging Optimization"
+              - name: "Thermal Runaway & Safety"
+              - name: "Battery Datasets"
+              - name: "Physics-Informed Battery Models"
+          - name: "Time-Series & Dynamical Systems"
+            children:
+              - name: "Neural ODEs & CDEs"
+              - name: "Model Predictive Control"
+              - name: "State-Space Models"
+              - name: "Dynamical Systems"
+              - name: "Wavelets & Signal Processing"
+          - name: "Graph Learning"
+            children:
+              - name: "GNN Architectures"
+              - name: "Knowledge Graphs"
+              - name: "Graph Representation Learning"
+              - name: "Dynamic Graphs"
+              - name: "Graph Anomaly Detection"
+          - name: "Medical AI"
+            children:
+              - name: "Biomedical VLMs"
+              - name: "Radiology VLMs"
+              - name: "Medical Representation Learning"
+              - name: "Medical Segmentation"
+              - name: "Medical Diagnosis"
+      - name: "30 Resources"
+        children:
+          - name: "Foundational Papers"
+          - name: "Surveys"
+          - name: "Datasets"
+          - name: "Benchmarks"
+          - name: "Toolkits & Libraries"
+          - name: "Open-Source Implementations"
+          - name: "Evaluation Protocols"
+      - name: "40 Cleanup"
+        children:
+          - name: "Duplicate Candidates"
+          - name: "Missing Metadata"
+          - name: "Missing Abstract"
+          - name: "Broken PDF"
+          - name: "Non-Paper Items"
+          - name: "Low Confidence"
+      - name: "90 Archives"
+
+tags:
+  status:
+    - status/to-read
+    - status/skimmed
+    - status/read
+    - status/implemented
+    - status/cited
+    - status/review-needed
+  area:
+    - area/llm
+    - area/vlm
+    - area/vla-robotics
+    - area/world-models
+    - area/recurrent-adaptive-computation
+    - area/efficient-ml
+    - area/classic-cv
+    - area/representation-learning
+    - area/anomaly-detection
+    - area/battery-ml
+    - area/time-series
+    - area/graph-learning
+    - area/medical-ai
+  method:
+    - method/rag
+    - method/retrieval
+    - method/prompting
+    - method/cot
+    - method/latent-reasoning
+    - method/alignment
+    - method/jailbreak
+    - method/finetuning
+    - method/distillation
+    - method/kv-cache-compression
+    - method/world-model
+    - method/model-based-rl
+    - method/deferred-decoding
+    - method/looped-transformer
+    - method/recurrent-depth
+    - method/adaptive-computation
+    - method/early-exit
+    - method/parameter-sharing
+    - method/transformer
+    - method/cnn
+    - method/vit
+    - method/state-space-model
+    - method/mamba
+    - method/diffusion
+    - method/flow-matching
+    - method/control
+    - method/mpc
+    - method/neural-ode
+    - method/neural-cde
+    - method/gnn
+    - method/knowledge-graph
+    - method/contrastive-learning
+    - method/self-supervised-learning
+    - method/semi-supervised-learning
+    - method/data-augmentation
+    - method/prompt-learning
+    - method/adapter
+    - method/clip
+    - method/sam
+    - method/anomaly-localization
+    - method/physics-informed
+  task:
+    - task/question-answering
+    - task/reasoning
+    - task/planning
+    - task/robot-manipulation
+    - task/imitation-learning
+    - task/action-prediction
+    - task/world-simulation
+    - task/video-prediction
+    - task/object-detection
+    - task/segmentation
+    - task/tracking
+    - task/scene-flow
+    - task/3d-reconstruction
+    - task/image-classification
+    - task/anomaly-detection
+    - task/defect-inspection
+    - task/battery-prognostics
+    - task/rul-prediction
+    - task/soh-estimation
+    - task/thermal-runaway
+    - task/medical-diagnosis
+    - task/multimodal-understanding
+  type:
+    - type/method
+    - type/system
+    - type/dataset
+    - type/benchmark
+    - type/survey
+    - type/theory
+    - type/foundational
+    - type/tutorial
+    - type/non-paper
+  source:
+    - source/arxiv
+    - source/conference
+    - source/journal
+    - source/workshop
+    - source/web
+    - source/local-pdf
+    - source/unknown
+  cleanup:
+    - cleanup/duplicate-candidate
+    - cleanup/missing-metadata
+    - cleanup/missing-abstract
+    - cleanup/broken-pdf
+    - cleanup/low-confidence
+    - cleanup/possible-existing
+    - cleanup/new-version

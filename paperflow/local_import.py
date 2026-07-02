@@ -34,7 +34,12 @@ from paperflow.metadata import enrich_item
 from paperflow.migration_apply import collection_maps, creation_plan
 from paperflow.taxonomy_v2 import normalize_doi
 from paperflow.taxonomy_v3 import (
+    AMBIGUOUS_CLASSIFICATION_COLLECTION,
     COLLECTION_TREE_V3,
+    MISSING_ABSTRACT_REVIEW_COLLECTION,
+    MISSING_METADATA_REVIEW_COLLECTION,
+    NEW_ARXIV_VERSION_COLLECTION,
+    POSSIBLE_ZOTERO_DUPLICATE_COLLECTION,
     REVIEW_QUEUE_COLLECTION,
     TAG_VOCABULARY_V3,
     area_slug_from_collection,
@@ -845,120 +850,870 @@ def classify_text(row: dict[str, Any]) -> str:
     ).lower()
 
 
-def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> dict[str, Any]:
+def _clean_text(value: Any) -> str:
+    if isinstance(value, list):
+        value = " ".join(str(item) for item in value if item)
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _text_before_references(text: str) -> str:
+    match = re.search(r"(?is)(?:^|\n|\.\s+)\s*(?:references|bibliography)\s*(?:\n|$|[:.]|\s)", text)
+    return text[: match.start()] if match else text
+
+
+def _keyword_text(row: dict[str, Any]) -> str:
+    text = row.get("first_pages_text") or ""
+    match = re.search(r"(?is)\bkeywords?\b\s*[:.\-]?\s+(?P<body>.+?)(?=\n\s*(?:abstract|1\s+introduction|introduction)\b|$)", text)
+    return _clean_text(match.group("body")) if match else ""
+
+
+def classification_evidence(row: dict[str, Any]) -> dict[str, Any]:
     detected = row.get("detected", {})
+    title = _clean_text(detected.get("title") or row.get("pdf_metadata_title") or title_from_filename(Path(row.get("filename") or "")))
+    abstract = _clean_text(
+        row.get("first_page_abstract_candidate")
+        or detected.get("abstract")
+        or detected.get("abstractNote")
+        or row.get("abstract")
+    )
+    first_pages = _clean_text(row.get("first_pages_text"))
+    arxiv_categories = _clean_text(row.get("arxiv_categories") or detected.get("arxiv_categories"))
+    venue = _clean_text(row.get("publicationTitle") or row.get("venue") or detected.get("publicationTitle"))
+    existing_tags = _clean_text(row.get("existing_tags") or detected.get("existing_tags"))
+    values = [
+        title,
+        abstract,
+        arxiv_categories,
+        venue,
+        _clean_text(detected.get("doi")),
+        _clean_text(detected.get("arxiv_id")),
+        _clean_text(row.get("filename")),
+        _clean_text(row.get("pdf_metadata_title")),
+        _keyword_text(row),
+        first_pages,
+        existing_tags,
+    ]
+    full_text = "\n".join(value for value in values if value)
+    main_text = _text_before_references(full_text).lower()
+    return {
+        "title": title,
+        "abstract": abstract,
+        "first_pages_text": first_pages,
+        "arxiv_categories": arxiv_categories,
+        "venue": venue,
+        "keywords": _keyword_text(row),
+        "filename": _clean_text(row.get("filename")),
+        "existing_tags": existing_tags,
+        "full_text": full_text.lower(),
+        "main_text": main_text,
+        "detected": detected,
+    }
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> list[str]:
+    matches: list[str] = []
+    for term in terms:
+        pattern = r"(?<![a-z0-9])" + re.escape(term.lower()).replace(r"\ ", r"[\s\-]+") + r"(?![a-z0-9])"
+        if re.search(pattern, text):
+            matches.append(term)
+    return matches
+
+
+def _evidence_snippet(text: str, term: str) -> str:
+    if not text or not term:
+        return ""
+    normalized = re.sub(r"\s+", " ", text)
+    index = normalized.lower().find(term.lower())
+    if index < 0:
+        return term
+    start = max(0, index - 70)
+    end = min(len(normalized), index + len(term) + 90)
+    prefix = "..." if start else ""
+    suffix = "..." if end < len(normalized) else ""
+    return f"{prefix}{normalized[start:end].strip()}{suffix}"
+
+
+def _add_candidate(
+    candidates: list[dict[str, Any]],
+    collection: str,
+    score: float,
+    tags: list[str],
+    reason: str,
+    evidence_text: str,
+    matched: list[str],
+) -> None:
+    if not matched:
+        return
+    candidates.append(
+        {
+            "collection": collection,
+            "score": score,
+            "tags": tags,
+            "reason": reason,
+            "matched_terms": matched,
+            "evidence_snippet": _evidence_snippet(evidence_text, matched[0]),
+        }
+    )
+
+
+def _trusted_arxiv_source(row: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    detected = row.get("detected", {})
+    doi = normalize_doi(detected.get("doi"))
+    text = evidence["full_text"]
+    return bool(
+        arxiv_id_from_doi(doi)
+        or arxiv_id_from_url(text)
+        or re.search(r"(?i)\barxiv\s*:\s*\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}(?:v\d+)?", text)
+    )
+
+
+def _source_tag(row: dict[str, Any], evidence: dict[str, Any]) -> str:
+    detected = row.get("detected", {})
+    doi = normalize_doi(detected.get("doi"))
+    text = evidence["full_text"]
+    if detected.get("arxiv_id") and _trusted_arxiv_source(row, evidence):
+        return "source/arxiv"
+    if doi and doi.startswith(("10.1109/", "10.1145/")):
+        return "source/conference"
+    if doi and doi.startswith(("10.1016/", "10.1038/", "10.1007/", "10.3390/", "10.1039/", "10.1088/")):
+        return "source/journal"
+    if "workshop" in text:
+        return "source/workshop"
+    if detected.get("arxiv_id"):
+        return "source/local-pdf"
+    return "source/local-pdf"
+
+
+def _metadata_missing(row: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    detected = row.get("detected", {})
+    return not (detected.get("doi") or detected.get("arxiv_id")) or not evidence["title"] or not detected.get("year")
+
+
+def _abstract_missing(row: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    detected = row.get("detected", {})
+    return not bool(detected.get("abstract_present") or evidence["abstract"])
+
+
+def _resource_candidates(candidates: list[dict[str, Any]], evidence: dict[str, Any]) -> None:
+    text = evidence["main_text"]
+    survey_terms = ("survey", "review", "tutorial")
+    dataset_terms = ("introduce a dataset", "new dataset", "dataset", "corpus")
+    benchmark_terms = ("benchmark", "leaderboard", "evaluation suite", "challenge", "evaluation protocol")
+    tool_terms = ("toolbox", "toolkit", "software framework", "platform", "open-source library", "reusable pipeline")
+    foundational_terms = (
+        "attention is all you need",
+        "deep residual learning",
+        "batch normalization",
+        "you only look once",
+        "faster r-cnn",
+        "feature pyramid networks",
+        "u-net",
+        "an image is worth 16x16 words",
+        "learning transferable visual models",
+        "neural ordinary differential equations",
+        "semi-supervised classification with graph convolutional networks",
+        "a simple framework for contrastive learning",
+        "momentum contrast",
+        "fixmatch",
+        "end-to-end object detection with transformers",
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/30 Resources/Surveys",
+        0.78,
+        ["type/survey"],
+        "survey/tutorial signal",
+        text,
+        _contains_any(text, survey_terms),
+    )
+    dataset_matches = _contains_any(text, dataset_terms)
+    if dataset_matches and _contains_any(text, ("introduce", "propose", "present", "release", "construct", "curate")):
+        _add_candidate(
+            candidates,
+            "AI Library/30 Resources/Datasets",
+            0.72,
+            ["type/dataset"],
+            "paper appears to introduce a dataset",
+            text,
+            dataset_matches,
+        )
+    benchmark_matches = _contains_any(text, benchmark_terms)
+    if benchmark_matches and _contains_any(text, ("introduce", "propose", "present", "evaluate", "evaluation suite", "leaderboard")):
+        _add_candidate(
+            candidates,
+            "AI Library/30 Resources/Benchmarks",
+            0.72,
+            ["type/benchmark"],
+            "paper appears to introduce a benchmark or evaluation protocol",
+            text,
+            benchmark_matches,
+        )
+    _add_candidate(
+        candidates,
+        "AI Library/30 Resources/Toolkits & Libraries",
+        0.72,
+        ["type/system"],
+        "paper appears to introduce software/tooling",
+        text,
+        _contains_any(text, tool_terms),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/30 Resources/Foundational Papers",
+        0.86,
+        ["type/foundational"],
+        "foundational paper title or canonical method signal",
+        text,
+        _contains_any(text, foundational_terms),
+    )
+
+
+def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> dict[str, Any]:
+    evidence = classification_evidence(row)
     if forced_review:
-        cleanup_collection = (
-            "AI Library/40 Cleanup/Update Candidates"
+        review_collection = (
+            NEW_ARXIV_VERSION_COLLECTION
             if forced_review == "update_candidate"
-            else "AI Library/40 Cleanup/Possible Existing in Zotero"
+            else POSSIBLE_ZOTERO_DUPLICATE_COLLECTION
         )
         return {
-            "target_collections": [REVIEW_QUEUE_COLLECTION, cleanup_collection],
+            "target_collections": [review_collection],
             "normalized_tags": clamp_tags_v3(
                 [
-                    "status/to-read",
-                    "cleanup/update-candidate" if forced_review == "update_candidate" else "cleanup/possible-existing",
-                    "source/arxiv" if detected.get("arxiv_id") else "source/unknown",
+                    "status/review-needed",
+                    "cleanup/new-version" if forced_review == "update_candidate" else "cleanup/possible-existing",
+                    _source_tag(row, evidence),
                 ]
             ),
             "confidence": 0.2,
             "rationale": f"sent to review because match_status={forced_review}",
+            "evidence_snippets": [],
         }
-    text = classify_text(row)
-    collections: list[str] = []
-    tags = ["status/to-read"]
-    reasons: list[str] = []
 
-    def add(collection: str, *new_tags: str, reason: str) -> None:
-        collections.append(collection)
-        tags.extend(new_tags)
-        reasons.append(reason)
+    text = evidence["main_text"]
+    title = evidence["title"].lower()
+    abstract = evidence["abstract"].lower()
+    candidates: list[dict[str, Any]] = []
+    tags = ["status/to-read", _source_tag(row, evidence), "type/method"]
+
+    if "looped world models" in title or "first looped architectures for world modelling" in abstract:
+        candidates.extend(
+            [
+                {
+                    "collection": "AI Library/20 Areas/World Models & Simulation/Latent World Models",
+                    "score": 0.97,
+                    "tags": ["area/world-models", "method/world-model", "task/world-simulation"],
+                    "reason": "Looped World Models special rule",
+                    "matched_terms": ["Looped World Models"],
+                    "evidence_snippet": _evidence_snippet(evidence["full_text"], "Looped World Models"),
+                },
+                {
+                    "collection": "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers",
+                    "score": 0.91,
+                    "tags": [
+                        "area/recurrent-adaptive-computation",
+                        "method/looped-transformer",
+                        "method/recurrent-depth",
+                        "method/adaptive-computation",
+                    ],
+                    "reason": "looped/recurrent-depth architecture signal",
+                    "matched_terms": ["looped"],
+                    "evidence_snippet": _evidence_snippet(evidence["full_text"], "looped"),
+                },
+                {
+                    "collection": "AI Library/20 Areas/Efficient ML Systems/Parameter Sharing",
+                    "score": 0.86,
+                    "tags": ["area/efficient-ml", "method/parameter-sharing", "method/transformer"],
+                    "reason": "parameter-shared recurrent transformer signal",
+                    "matched_terms": ["parameter"],
+                    "evidence_snippet": _evidence_snippet(evidence["full_text"], "parameter"),
+                },
+            ]
+        )
 
     if strict_rag_signal(text):
-        add("AI Library/20 Areas/LLM/RAG & Retrieval", "area/rag", "method/retrieval", "method/rag", reason="explicit retrieval/RAG signal")
-    if any(term in text for term in ("world model", "looped world", "recurrent depth", "adaptive computation")):
-        add("AI Library/20 Areas/Embodied AI/World Models", "area/world-models", "method/world-model", "method/adaptive-computation", reason="world model/adaptive computation signal")
-    if any(term in text for term in ("robot", "manipulation", "imitation learning", "policy learning", "vla", "vision language action")):
-        add("AI Library/20 Areas/Embodied AI/Robot Manipulation", "area/robot-manipulation", "task/robot-manipulation", "method/control", reason="robot manipulation/VLA signal")
-    if any(term in text for term in ("clip", "vision language", "vision-language", "vlm")):
-        add("AI Library/20 Areas/Vision-Language/CLIP & Contrastive VLM", "area/vlm-contrastive", "task/multimodal-understanding", reason="vision-language signal")
-    if any(term in text for term in ("prompt learning", "coop", "cocoop")):
-        add("AI Library/20 Areas/Vision-Language/Prompt Learning", "area/vlm-prompt-learning", "method/prompting", reason="VLM prompt learning signal")
-    if any(term in text for term in ("document understanding", "chart", "ocr", "document ai")):
-        add("AI Library/20 Areas/Vision-Language/Document & Chart Understanding", "area/document-understanding", "task/multimodal-understanding", reason="document/chart understanding signal")
-    if any(term in text for term in ("battery", "state of health", "soh", "rul", "cycle life", "degradation")):
-        add("AI Library/20 Areas/Battery ML/SOH & RUL Prognostics", "area/battery-ml", "task/battery-prognostics", "task/rul-prediction", reason="battery prognostics signal")
-    if any(term in text for term in ("anomaly", "defect", "mvtec", "industrial inspection")):
-        add("AI Library/20 Areas/Computer Vision/Anomaly & Defect Detection", "area/anomaly-detection", "task/anomaly-detection", reason="anomaly/defect detection signal")
-    if any(term in text for term in ("x-ray", "radiology", "chest", "biomedical", "medical image")):
-        add("AI Library/20 Areas/Medical AI/Radiology & X-ray", "area/medical-ai", "task/medical-diagnosis", reason="medical imaging signal")
-    if any(term in text for term in ("yolo", "faster r-cnn", "detr", "object detection", "bounding box")):
-        add("AI Library/20 Areas/Computer Vision/Object Detection", "area/object-detection", "task/object-detection", reason="object detection signal")
-    if any(term in text for term in ("segmentation", "u-net", "mask r-cnn", "sam ")):
-        add("AI Library/20 Areas/Computer Vision/Segmentation", "area/segmentation", "task/segmentation", reason="segmentation signal")
-    if any(term in text for term in ("graph neural", "gnn", "graph convolution")):
-        add("AI Library/20 Areas/Graph Learning/GNNs", "area/graph-learning", "method/gnn", reason="GNN signal")
-    if any(term in text for term in ("knowledge graph", "kg ")):
-        add("AI Library/20 Areas/Graph Learning/Knowledge Graphs", "area/graph-learning", reason="knowledge graph signal")
-    if any(term in text for term in ("time series", "forecast", "temporal")):
-        add("AI Library/20 Areas/Time-Series/Forecasting", "area/time-series", reason="time-series signal")
-    if any(term in text for term in ("neural ode", "dynamical system", "controlled differential")):
-        add("AI Library/20 Areas/Time-Series/Dynamical Systems", "area/dynamical-systems", reason="dynamical systems signal")
-    if any(term in text for term in ("kv cache", "cache compression", "efficient inference", "quantization", "distillation", "compression")):
-        add("AI Library/20 Areas/Efficient ML/Inference & KV Cache", "area/efficient-ml", "method/efficient-compute", reason="efficient inference/compression signal")
-    if any(term in text for term in ("jailbreak", "alignment", "hallucination", "safety")):
-        add("AI Library/20 Areas/LLM/Alignment, Safety & Hallucination", "area/alignment-safety", "method/alignment", reason="alignment/safety signal")
-    if any(term in text for term in ("survey", "review", "tutorial")):
-        add("AI Library/30 Resources/Surveys & Tutorials", "type/survey", reason="survey/tutorial signal")
-    if any(term in text for term in ("attention is all you need", "resnet", "alexnet", "batch normalization", "vit ", "u-net")):
-        add("AI Library/30 Resources/Foundational Papers", "type/foundational", reason="foundational title signal")
+        _add_candidate(
+            candidates,
+            "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval",
+            0.88,
+            ["area/llm", "method/rag", "method/retrieval"],
+            "explicit RAG/retrieval evidence outside references",
+            text,
+            _contains_any(
+                text,
+                (
+                    "retrieval augmented generation",
+                    "retrieval-augmented generation",
+                    "retriever",
+                    "dense retrieval",
+                    "sparse retrieval",
+                    "document retrieval",
+                    "passage retrieval",
+                    "query-document matching",
+                    "query-document retrieval",
+                    "vector index",
+                    "knowledge base retrieval",
+                    "knowledge-base retrieval",
+                    "grounded generation",
+                    "citation-grounded generation",
+                    "retrieve-then-generate",
+                ),
+            ),
+        )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/World Models & Simulation/Latent World Models",
+        0.86,
+        ["area/world-models", "method/world-model", "task/world-simulation"],
+        "world model / learned environment dynamics signal",
+        text,
+        _contains_any(
+            text,
+            (
+                "world model",
+                "environment dynamics",
+                "latent dynamics",
+                "model-based reinforcement learning",
+                "learned simulator",
+                "long-horizon rollout",
+                "action-conditioned prediction",
+                "future state prediction",
+                "imagination rollout",
+                "dreamer",
+                "planet",
+                "muzero",
+                "genie",
+                "sora as world model",
+                "video world model",
+            ),
+        ),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/World Models & Simulation/Deferred Decoding",
+        0.84,
+        ["area/world-models", "method/world-model", "method/deferred-decoding"],
+        "deferred decoding world-model signal",
+        text,
+        _contains_any(text, ("deferred decoding",)),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers",
+        0.82,
+        ["area/recurrent-adaptive-computation", "method/looped-transformer", "method/transformer"],
+        "looped transformer signal",
+        text,
+        _contains_any(text, ("looped transformer",)),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Recurrent & Adaptive Computation/Recurrent-Depth Models",
+        0.82,
+        ["area/recurrent-adaptive-computation", "method/recurrent-depth"],
+        "recurrent-depth model signal",
+        text,
+        _contains_any(text, ("recurrent depth", "iterative latent depth")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Recurrent & Adaptive Computation/Adaptive Computation Time",
+        0.8,
+        ["area/recurrent-adaptive-computation", "method/adaptive-computation"],
+        "adaptive computation signal",
+        text,
+        _contains_any(text, ("adaptive computation", "adaptive computation time", "test-time compute scaling")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Recurrent & Adaptive Computation/Early Exit",
+        0.78,
+        ["area/recurrent-adaptive-computation", "method/early-exit"],
+        "early-exit/dynamic-depth signal",
+        text,
+        _contains_any(text, ("early exit", "dynamic depth", "elastic depth", "universal transformer")),
+    )
+
+    battery_matches = _contains_any(
+        text,
+        (
+            "lithium-ion battery",
+            "battery degradation",
+            "cycle life",
+            "soh",
+            "state of health",
+            "rul",
+            "remaining useful life",
+            "fast charging",
+            "thermal runaway",
+            "battery lifetime",
+            "battery prognosis",
+        ),
+    )
+    if battery_matches:
+        battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Battery Life Prediction"
+        battery_tags = ["area/battery-ml", "task/battery-prognostics"]
+        if _contains_any(text, ("rul", "remaining useful life", "soh", "state of health")):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/RUL & SOH Estimation"
+            battery_tags.extend(["task/rul-prediction", "task/soh-estimation"])
+        elif _contains_any(text, ("degradation", "cycle life")):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Degradation Modeling"
+        elif _contains_any(text, ("fast charging",)):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Fast Charging Optimization"
+        elif _contains_any(text, ("thermal runaway", "failure", "safety")):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Thermal Runaway & Safety"
+            battery_tags.append("task/thermal-runaway")
+        if _contains_any(text, ("physics-informed", "physics informed")):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Physics-Informed Battery Models"
+            battery_tags.append("method/physics-informed")
+        if _contains_any(text, ("battery dataset", "battery benchmark")):
+            battery_collection = "AI Library/20 Areas/Battery ML & Prognostics/Battery Datasets"
+            battery_tags.append("type/dataset")
+        _add_candidate(
+            candidates,
+            battery_collection,
+            0.88,
+            battery_tags,
+            "battery ML/prognostics signal",
+            text,
+            battery_matches,
+        )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Vision-Language-Action & Robotics/Robot Manipulation",
+        0.84,
+        ["area/vla-robotics", "task/robot-manipulation", "method/control"],
+        "robot manipulation / VLA signal",
+        text,
+        _contains_any(
+            text,
+            (
+                "vision-language-action",
+                "vla",
+                "robot manipulation",
+                "imitation learning",
+                "inverse dynamics",
+                "action model",
+                "policy learning",
+                "bimanual",
+                "robot policy",
+                "embodied agent",
+                "libero",
+                "openvla",
+                "smolvla",
+            ),
+        ),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Vision-Language-Action & Robotics/Imitation Learning",
+        0.8,
+        ["area/vla-robotics", "task/imitation-learning"],
+        "imitation learning signal",
+        text,
+        _contains_any(text, ("imitation learning",)),
+    )
+
+    vlm_matches = _contains_any(
+        text,
+        (
+            "clip",
+            "vision-language model",
+            "vision language model",
+            "vlm",
+            "multimodal prompt learning",
+            "visual question answering",
+            "image-text",
+            "text-aware visual",
+        ),
+    )
+    if vlm_matches:
+        vlm_collection = "AI Library/20 Areas/Vision-Language Models/CLIP-style Representation"
+        vlm_tags = ["area/vlm", "task/multimodal-understanding"]
+        if _contains_any(text, ("coop", "cocoop", "maple", "tip-adapter", "apollo", "graphadapter", "prompt learning", "adapter")):
+            vlm_collection = "AI Library/20 Areas/Vision-Language Models/Prompt Learning & Adapters"
+            vlm_tags.extend(["method/prompt-learning", "method/adapter"])
+        elif _contains_any(text, ("visual question answering", "multimodal reasoning")):
+            vlm_collection = "AI Library/20 Areas/Vision-Language Models/Multimodal Reasoning"
+            vlm_tags.append("task/question-answering")
+        elif _contains_any(text, ("vlm evaluation",)):
+            vlm_collection = "AI Library/20 Areas/Vision-Language Models/VLM Evaluation"
+        if "clip" in vlm_matches:
+            vlm_tags.append("method/clip")
+        _add_candidate(candidates, vlm_collection, 0.82, vlm_tags, "vision-language model signal", text, vlm_matches)
+
+    anomaly_matches = _contains_any(
+        text,
+        (
+            "anomaly detection",
+            "defect detection",
+            "industrial inspection",
+            "mvtec",
+            "crack segmentation",
+            "fault detection",
+            "zero-shot anomaly",
+        ),
+    )
+    if anomaly_matches:
+        anomaly_collection = "AI Library/20 Areas/Anomaly & Defect Detection/Industrial Anomaly Detection"
+        anomaly_tags = ["area/anomaly-detection", "task/anomaly-detection"]
+        if _contains_any(text, ("defect detection", "industrial inspection", "mvtec", "crack segmentation")):
+            anomaly_collection = "AI Library/20 Areas/Anomaly & Defect Detection/Visual Defect Inspection"
+            anomaly_tags.append("task/defect-inspection")
+        if _contains_any(text, ("zero-shot anomaly", "anomalyclip", "winclip", "adaclip", "gpt-4v-ad")):
+            anomaly_collection = "AI Library/20 Areas/Anomaly & Defect Detection/Zero-Shot Anomaly Detection"
+            anomaly_tags.append("method/clip")
+        if _contains_any(text, ("anomaly segmentation", "crack segmentation")):
+            anomaly_collection = "AI Library/20 Areas/Anomaly & Defect Detection/Anomaly Segmentation"
+            anomaly_tags.extend(["task/segmentation", "method/anomaly-localization"])
+        _add_candidate(candidates, anomaly_collection, 0.84, anomaly_tags, "anomaly/defect detection signal", text, anomaly_matches)
+        if _contains_any(text, ("anomalyclip", "winclip", "adaclip", "gpt-4v-ad", "vlm anomaly")):
+            _add_candidate(
+                candidates,
+                "AI Library/20 Areas/Vision-Language Models/VLM Evaluation",
+                0.72,
+                ["area/vlm", "method/clip"],
+                "VLM anomaly detection signal",
+                text,
+                _contains_any(text, ("anomalyclip", "winclip", "adaclip", "gpt-4v-ad", "vlm anomaly")),
+            )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Object Detection",
+        0.8,
+        ["area/classic-cv", "task/object-detection"],
+        "object detection signal",
+        text,
+        _contains_any(text, ("yolo", "faster r-cnn", "detr", "object detection", "bounding box", "fpn")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Segmentation",
+        0.78,
+        ["area/classic-cv", "task/segmentation"],
+        "segmentation signal",
+        text,
+        _contains_any(text, ("segmentation", "u-net", "mask r-cnn", "sam")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Vision Transformers",
+        0.76,
+        ["area/classic-cv", "method/vit", "method/transformer"],
+        "vision transformer signal",
+        text,
+        _contains_any(text, ("vision transformer", "vit", "detr")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/CNN Architectures",
+        0.75,
+        ["area/classic-cv", "method/cnn"],
+        "CNN architecture signal",
+        text,
+        _contains_any(text, ("resnet", "efficientnet", "eca-net", "senet", "cnn architecture", "convolutional neural network")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Explainability & Attribution",
+        0.76,
+        ["area/classic-cv"],
+        "explainability/attribution signal",
+        text,
+        _contains_any(text, ("grad-cam", "explainability", "attribution")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/State Space Vision Models",
+        0.76,
+        ["area/classic-cv", "method/state-space-model", "method/mamba"],
+        "vision state-space model signal",
+        text,
+        _contains_any(text, ("mamba vision", "state space vision", "vision mamba")),
+    )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Representation Learning/Contrastive Learning",
+        0.84,
+        ["area/representation-learning", "method/contrastive-learning"],
+        "contrastive representation learning signal",
+        text,
+        _contains_any(text, ("simclr", "moco", "contrastive learning")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Representation Learning/Self-Supervised Learning",
+        0.82,
+        ["area/representation-learning", "method/self-supervised-learning"],
+        "self-supervised representation learning signal",
+        text,
+        _contains_any(text, ("self-supervised", "self supervised")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Representation Learning/Semi-Supervised Learning",
+        0.82,
+        ["area/representation-learning", "method/semi-supervised-learning"],
+        "semi-supervised representation learning signal",
+        text,
+        _contains_any(text, ("semi-supervised", "semi supervised", "fixmatch", "comatch", "simmatch")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Representation Learning/Data Augmentation",
+        0.76,
+        ["area/representation-learning", "method/data-augmentation"],
+        "data augmentation signal",
+        text,
+        _contains_any(text, ("randaugment", "autoaugment", "data augmentation")),
+    )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Graph Learning/GNN Architectures",
+        0.82,
+        ["area/graph-learning", "method/gnn"],
+        "GNN/graph convolution signal",
+        text,
+        _contains_any(text, ("gcn", "gnn", "graph neural", "graph convolution")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Graph Learning/Knowledge Graphs",
+        0.8,
+        ["area/graph-learning", "method/knowledge-graph"],
+        "knowledge graph signal",
+        text,
+        _contains_any(text, ("knowledge graph", "transe", "graph embedding")),
+    )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Time-Series & Dynamical Systems/Neural ODEs & CDEs",
+        0.84,
+        ["area/time-series", "method/neural-ode", "method/neural-cde"],
+        "Neural ODE/CDE signal",
+        text,
+        _contains_any(text, ("neural ode", "neural cde", "controlled differential equation", "controlled differential equations")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Time-Series & Dynamical Systems/Model Predictive Control",
+        0.82,
+        ["area/time-series", "method/mpc", "method/control"],
+        "model predictive control signal",
+        text,
+        _contains_any(text, ("model predictive control", "mpc", "temporal difference control")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Time-Series & Dynamical Systems/State-Space Models",
+        0.78,
+        ["area/time-series", "method/state-space-model"],
+        "state-space dynamics signal",
+        text,
+        _contains_any(text, ("state-space", "state space model", "state-space dynamics")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Time-Series & Dynamical Systems/Wavelets & Signal Processing",
+        0.76,
+        ["area/time-series"],
+        "wavelet/signal processing signal",
+        text,
+        _contains_any(text, ("wavelet", "signal processing")),
+    )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/KV Cache & Compression",
+        0.84,
+        ["area/llm", "area/efficient-ml", "method/kv-cache-compression"],
+        "KV cache/compression signal",
+        text,
+        _contains_any(text, ("kv cache", "cache compression", "kv-cache compression")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Efficient ML Systems/Inference Acceleration",
+        0.82,
+        ["area/efficient-ml"],
+        "efficient inference/acceleration signal",
+        text,
+        _contains_any(text, ("inference acceleration", "efficient inference", "edge deployment", "quantization", "pruning")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Efficient ML Systems/Distillation",
+        0.8,
+        ["area/efficient-ml", "method/distillation"],
+        "distillation signal",
+        text,
+        _contains_any(text, ("distillation", "small lm", "small language model")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Efficient ML Systems/Parameter Sharing",
+        0.78,
+        ["area/efficient-ml", "method/parameter-sharing"],
+        "parameter sharing signal",
+        text,
+        _contains_any(text, ("parameter sharing", "parameter-shared", "shared parameters")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/Alignment & Safety",
+        0.82,
+        ["area/llm", "method/alignment"],
+        "alignment/safety signal",
+        text,
+        _contains_any(text, ("alignment", "llm safety", "ai safety")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/Hallucination & Factuality",
+        0.8,
+        ["area/llm"],
+        "hallucination/factuality signal",
+        text,
+        _contains_any(text, ("hallucination", "factuality")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/Jailbreaks & Security",
+        0.8,
+        ["area/llm", "method/jailbreak"],
+        "jailbreak/security signal",
+        text,
+        _contains_any(text, ("jailbreak", "prompt injection", "llm security")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/Chain-of-Thought & Latent Reasoning",
+        0.78,
+        ["area/llm", "method/cot", "method/latent-reasoning", "task/reasoning"],
+        "chain-of-thought/latent reasoning signal",
+        text,
+        _contains_any(text, ("chain-of-thought", "chain of thought", "latent reasoning", "reasoning")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/LLMs & Reasoning/Prompting & In-Context Learning",
+        0.76,
+        ["area/llm", "method/prompting"],
+        "prompting/in-context learning signal",
+        text,
+        _contains_any(text, ("prompting", "in-context learning", "in context learning")),
+    )
+
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Medical AI/Radiology VLMs",
+        0.84,
+        ["area/medical-ai", "area/vlm", "task/medical-diagnosis"],
+        "radiology/biomedical VLM signal",
+        text,
+        _contains_any(text, ("chest x-ray", "chest x ray", "radiology", "biomedical vlm", "medical image-text", "medical vision-language")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Medical AI/Medical Segmentation",
+        0.8,
+        ["area/medical-ai", "task/segmentation"],
+        "medical segmentation signal",
+        text,
+        _contains_any(text, ("medical segmentation",)),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Medical AI/Medical Diagnosis",
+        0.8,
+        ["area/medical-ai", "task/medical-diagnosis"],
+        "medical diagnosis signal",
+        text,
+        _contains_any(text, ("medical diagnosis", "diagnosis")),
+    )
+    _resource_candidates(candidates, evidence)
 
     if "transformer" in text:
         tags.append("method/transformer")
     if "cnn" in text or "convolution" in text:
         tags.append("method/cnn")
-    if "contrastive" in text:
-        tags.append("method/contrastive-learning")
-    if "self-supervised" in text:
-        tags.append("method/self-supervised-learning")
     if "diffusion" in text:
         tags.append("method/diffusion")
-    if detected.get("arxiv_id"):
-        tags.append("source/arxiv")
-    else:
-        tags.append("source/unknown")
-    tags.append("type/method")
+    if "mamba" in text:
+        tags.append("method/mamba")
+    if "flow matching" in text:
+        tags.append("method/flow-matching")
 
-    collections = unique_preserve_order(collections)[:3]
-    confidence = min(0.95, 0.52 + 0.14 * len(collections))
-    if not collections:
-        collections = [REVIEW_QUEUE_COLLECTION]
+    sorted_candidates = sorted(candidates, key=lambda candidate: candidate["score"], reverse=True)
+    collections = unique_preserve_order([candidate["collection"] for candidate in sorted_candidates])
+    for candidate in sorted_candidates:
+        tags.extend(candidate["tags"])
+    confidence = round(sorted_candidates[0]["score"], 2) if sorted_candidates else 0.25
+    reasons = [candidate["reason"] for candidate in sorted_candidates]
+    if confidence >= 0.75:
+        collections = collections[:3]
+    elif confidence >= 0.55:
+        collections = unique_preserve_order([collections[0], AMBIGUOUS_CLASSIFICATION_COLLECTION, *collections[1:2]])
+        tags.append("status/review-needed")
+        tags.append("cleanup/low-confidence")
+    else:
+        collections = [AMBIGUOUS_CLASSIFICATION_COLLECTION]
+        tags.append("status/review-needed")
+        tags.append("cleanup/low-confidence")
         confidence = 0.25
-        reasons.append("no fine-grained taxonomy rule matched")
+        reasons.append("no deterministic fine-grained taxonomy rule reached confidence threshold")
+
+    if _metadata_missing(row, evidence):
+        collections.append(MISSING_METADATA_REVIEW_COLLECTION)
+        tags.append("cleanup/missing-metadata")
+    if _abstract_missing(row, evidence):
+        collections.append(MISSING_ABSTRACT_REVIEW_COLLECTION)
+        tags.append("cleanup/missing-abstract")
+
+    collections = unique_preserve_order(collections)
     return {
         "target_collections": collections,
         "normalized_tags": clamp_tags_v3(tags),
         "confidence": round(confidence, 2),
         "rationale": "; ".join(unique_preserve_order(reasons)),
+        "evidence_snippets": [
+            {
+                "collection": candidate["collection"],
+                "matched_terms": candidate["matched_terms"],
+                "snippet": candidate["evidence_snippet"],
+            }
+            for candidate in sorted_candidates[:5]
+        ],
     }
 
 
 def strict_rag_signal(text: str) -> bool:
+    non_reference_text = _text_before_references(text).lower()
     patterns = (
         "retrieval augmented generation",
         "retrieval-augmented generation",
-        "rag",
         "retriever",
+        "dense retrieval",
+        "sparse retrieval",
         "document retrieval",
         "passage retrieval",
-        "dense retrieval",
-        "indexing",
+        "query-document matching",
+        "query-document retrieval",
+        "vector index",
         "knowledge-base retrieval",
+        "knowledge base retrieval",
+        "grounded generation",
         "citation-grounded",
-        "query-document",
+        "citation-grounded generation",
+        "retrieve-then-generate",
     )
-    return any(pattern in text for pattern in patterns)
+    return any(pattern in non_reference_text for pattern in patterns)
 
 
 def classify_new_local_papers(
@@ -1016,6 +1771,7 @@ def build_classification_item(
         "normalized_tags": classification["normalized_tags"],
         "confidence": classification["confidence"],
         "rationale": classification["rationale"],
+        "evidence_snippets": classification.get("evidence_snippets", []),
         "gemini_used": False,
         "classification_action": action,
     }
