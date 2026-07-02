@@ -158,6 +158,17 @@ class ApplyModeOption(StrEnum):
     REPLACE_COLLECTIONS = "replace-collections"
 
 
+def parse_bool_value(value: bool | str) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise typer.BadParameter("Expected a boolean value such as true or false.")
+
+
 zotero_credentials_app = typer.Typer(help="Zotero credential commands.")
 credentials_app.add_typer(zotero_credentials_app, name="zotero")
 
@@ -505,6 +516,7 @@ def cleanup_repair_abstracts(
     enable_gemini: bool = typer.Option(
         False,
         "--enable-gemini",
+        "--use-gemini",
         help="Use Gemini as a final extraction-only fallback.",
     ),
     gemini_model: str = typer.Option(
@@ -516,6 +528,11 @@ def cleanup_repair_abstracts(
         False,
         "--continue-on-gemini-quota",
         help="Continue cleanup planning after Gemini reports rate limiting.",
+    ),
+    stop_on_gemini_quota: str | None = typer.Option(
+        None,
+        "--stop-on-gemini-quota",
+        help="Boolean override; stop cleanup planning after Gemini quota/rate limiting.",
     ),
     item_key: list[str] | None = typer.Option(
         None,
@@ -532,7 +549,11 @@ def cleanup_repair_abstracts(
         enriched_path=enriched_items,
         enable_gemini=enable_gemini,
         gemini_model=gemini_model,
-        stop_on_gemini_quota_hit=not continue_on_gemini_quota,
+        stop_on_gemini_quota_hit=(
+            parse_bool_value(stop_on_gemini_quota)
+            if stop_on_gemini_quota is not None
+            else not continue_on_gemini_quota
+        ),
         item_keys=set(item_key) if item_key else None,
     )
     dump_json_data(output_path, plan)
@@ -598,6 +619,7 @@ def cleanup_repair_metadata(
     enable_gemini: bool = typer.Option(
         False,
         "--enable-gemini",
+        "--use-gemini",
         help="Use Gemini as a final extraction-only fallback.",
     ),
     gemini_model: str = typer.Option(
@@ -609,6 +631,11 @@ def cleanup_repair_metadata(
         False,
         "--continue-on-gemini-quota",
         help="Continue cleanup planning after Gemini reports rate limiting.",
+    ),
+    stop_on_gemini_quota: str | None = typer.Option(
+        None,
+        "--stop-on-gemini-quota",
+        help="Boolean override; stop cleanup planning after Gemini quota/rate limiting.",
     ),
 ) -> None:
     """Repair Missing Metadata cleanup items with field-level diffs."""
@@ -622,7 +649,11 @@ def cleanup_repair_metadata(
         approved_fields=set(approved_field) if approved_field else None,
         enable_gemini=enable_gemini,
         gemini_model=gemini_model,
-        stop_on_gemini_quota_hit=not continue_on_gemini_quota,
+        stop_on_gemini_quota_hit=(
+            parse_bool_value(stop_on_gemini_quota)
+            if stop_on_gemini_quota is not None
+            else not continue_on_gemini_quota
+        ),
     )
     dump_json_data(output_path, plan)
     write_metadata_repair_report(plan, report_path)
@@ -776,6 +807,11 @@ def local_classify_new_command(
     csv_output: Path = typer.Option(Path("data/local_classification.csv"), "--csv-output", help="CSV report output."),
     include_possible_existing: bool = typer.Option(False, "--include-possible-existing", help="Classify possible matches for review/import."),
     include_update_candidates: bool = typer.Option(False, "--include-update-candidates", help="Classify newer arXiv/update candidates."),
+    use_gemini: bool = typer.Option(False, "--use-gemini", help="Use Gemini only as fallback for ambiguous/low-confidence classification."),
+    gemini_model: str = typer.Option(DEFAULT_GEMINI_MODEL, "--gemini-model", help="Gemini model for optional classification fallback."),
+    gemini_batch_size: int = typer.Option(5, "--gemini-batch-size", min=1, help="Number of rows to process per Gemini batch window."),
+    stop_on_gemini_quota: str = typer.Option("true", "--stop-on-gemini-quota", help="Stop and write a partial plan if Gemini reports quota/rate limiting."),
+    gemini_review_threshold: float = typer.Option(0.75, "--gemini-review-threshold", min=0.0, max=1.0, help="Minimum Gemini confidence to accept a fallback classification."),
 ) -> None:
     """Classify only local PDFs that are not already in Zotero by default."""
 
@@ -786,10 +822,16 @@ def local_classify_new_command(
         matches,
         include_possible_existing=include_possible_existing,
         include_update_candidates=include_update_candidates,
+        use_gemini=use_gemini,
+        gemini_model=gemini_model,
+        gemini_batch_size=gemini_batch_size,
+        stop_on_gemini_quota=parse_bool_value(stop_on_gemini_quota),
+        gemini_review_threshold=gemini_review_threshold,
     )
     dump_json_data(output_path, plan)
     write_classification_report(plan, report_path, csv_output)
-    console.print(f"Wrote local classification plan to {output_path}.")
+    suffix = " Partial plan: Gemini quota/rate limit reached." if plan.get("partial") else ""
+    console.print(f"Wrote local classification plan to {output_path}.{suffix}")
 
 
 @local_app.command("plan-import")

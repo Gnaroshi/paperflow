@@ -15,6 +15,8 @@ import pandas as pd
 from pypdf import PdfReader
 from rapidfuzz import fuzz
 
+from paperflow.credentials import DEFAULT_GEMINI_MODEL, GeminiClient
+from paperflow.gemini_classifier import classify_with_gemini
 from paperflow.ingest import (
     _created_key,
     _find_existing_parent,
@@ -1721,30 +1723,134 @@ def classify_new_local_papers(
     matches: dict[str, Any],
     include_possible_existing: bool = False,
     include_update_candidates: bool = False,
+    use_gemini: bool = False,
+    gemini_model: str = DEFAULT_GEMINI_MODEL,
+    gemini_batch_size: int = 5,
+    stop_on_gemini_quota: bool = True,
+    gemini_review_threshold: float = 0.75,
+    gemini_client: GeminiClient | None = None,
 ) -> dict[str, Any]:
     match_by_path = {row["local_path"]: row for row in matches.get("matches", [])}
     items: list[dict[str, Any]] = []
-    for row in scan.get("files", []):
-        match = match_by_path.get(row.get("path"))
-        status = match.get("match_status") if match else "new"
-        if status in {"exact_existing", "likely_existing", "error"}:
-            continue
-        if status == "possible_existing" and not include_possible_existing:
-            items.append(build_classification_item(row, match, classify_scan_row(row, "possible_existing"), "review"))
-            continue
-        if status == "update_candidate" and not include_update_candidates:
-            items.append(build_classification_item(row, match, classify_scan_row(row, "update_candidate"), "review"))
-            continue
-        if status == "new" or include_possible_existing or include_update_candidates:
-            items.append(build_classification_item(row, match, classify_scan_row(row), "import"))
+    gemini_status: dict[str, Any] = {
+        "enabled": use_gemini,
+        "model": gemini_model if use_gemini else None,
+        "batch_size": gemini_batch_size if use_gemini else None,
+        "review_threshold": gemini_review_threshold if use_gemini else None,
+        "stopped_due_to_quota": False,
+        "errors": [],
+    }
+    owns_gemini = False
+    gemini = gemini_client
+    if use_gemini and gemini is None:
+        gemini = GeminiClient(model=gemini_model)
+        owns_gemini = True
+    batch_size = max(1, gemini_batch_size)
+    rows = list(scan.get("files", []))
+    try:
+        for batch_start in range(0, len(rows), batch_size):
+            for row in rows[batch_start : batch_start + batch_size]:
+                match = match_by_path.get(row.get("path"))
+                status = match.get("match_status") if match else "new"
+                if status in {"exact_existing", "likely_existing", "error"}:
+                    continue
+                if status == "possible_existing" and not include_possible_existing:
+                    items.append(
+                        build_classification_item(
+                            row,
+                            match,
+                            classify_scan_row(row, "possible_existing"),
+                            "review",
+                        )
+                    )
+                    continue
+                if status == "update_candidate" and not include_update_candidates:
+                    items.append(
+                        build_classification_item(
+                            row,
+                            match,
+                            classify_scan_row(row, "update_candidate"),
+                            "review",
+                        )
+                    )
+                    continue
+                if status == "new" or include_possible_existing or include_update_candidates:
+                    classification = classify_scan_row(row)
+                    if use_gemini and gemini is not None and should_try_gemini_classification(classification):
+                        gemini_result = classify_with_gemini(
+                            classification_evidence(row),
+                            gemini,
+                            review_threshold=gemini_review_threshold,
+                        )
+                        error_type = gemini_result.get("error_type")
+                        if error_type:
+                            gemini_status["errors"].append(
+                                {
+                                    "local_path": row.get("path"),
+                                    "error_type": error_type,
+                                    "message": gemini_result["classification"]["rationale"],
+                                }
+                            )
+                        classification = merge_gemini_fallback_classification(
+                            deterministic=classification,
+                            gemini_classification=gemini_result["classification"],
+                            accepted=bool(gemini_result.get("ok")),
+                        )
+                        if error_type == "rate_limited" and stop_on_gemini_quota:
+                            gemini_status["stopped_due_to_quota"] = True
+                            items.append(build_classification_item(row, match, classification, "review"))
+                            raise GeminiBatchStopped
+                    items.append(build_classification_item(row, match, classification, "import"))
+    except GeminiBatchStopped:
+        pass
+    finally:
+        if owns_gemini and gemini is not None:
+            gemini.close()
     return {
         "schema_version": "1.0",
         "taxonomy_version": "3.0",
         "generated_at": utc_now(),
         "collection_tree": COLLECTION_TREE_V3,
         "tag_vocabulary": TAG_VOCABULARY_V3,
+        "classification_engine": "deterministic+gemini-fallback" if use_gemini else "deterministic",
+        "partial": bool(gemini_status["stopped_due_to_quota"]),
+        "gemini": gemini_status,
         "items": items,
     }
+
+
+class GeminiBatchStopped(Exception):
+    pass
+
+
+def should_try_gemini_classification(classification: dict[str, Any]) -> bool:
+    return (
+        classification.get("confidence", 0) < 0.75
+        or AMBIGUOUS_CLASSIFICATION_COLLECTION in classification.get("target_collections", [])
+    )
+
+
+def merge_gemini_fallback_classification(
+    deterministic: dict[str, Any],
+    gemini_classification: dict[str, Any],
+    accepted: bool,
+) -> dict[str, Any]:
+    if accepted:
+        merged = dict(gemini_classification)
+        merged["rationale"] = (
+            f"{gemini_classification.get('rationale', '')}; "
+            f"deterministic fallback reason: {deterministic.get('rationale', '')}"
+        ).strip("; ")
+        return merged
+    merged = dict(deterministic)
+    merged["gemini_used"] = False
+    merged["gemini_rejected"] = True
+    merged["gemini_rejection_reason"] = gemini_classification.get("gemini_rejection_reason") or gemini_classification.get("rationale")
+    merged["rationale"] = (
+        f"{deterministic.get('rationale', '')}; Gemini fallback rejected: "
+        f"{merged['gemini_rejection_reason']}"
+    ).strip("; ")
+    return merged
 
 
 def build_classification_item(
@@ -1772,7 +1878,9 @@ def build_classification_item(
         "confidence": classification["confidence"],
         "rationale": classification["rationale"],
         "evidence_snippets": classification.get("evidence_snippets", []),
-        "gemini_used": False,
+        "gemini_used": bool(classification.get("gemini_used")),
+        "gemini_rejected": bool(classification.get("gemini_rejected")),
+        "gemini_rejection_reason": classification.get("gemini_rejection_reason"),
         "classification_action": action,
     }
 
@@ -1788,6 +1896,9 @@ def write_classification_report(plan: dict[str, Any], markdown_output: Path, csv
         f"- Items: {len(rows)}",
         f"- Planned import: {imports}",
         f"- Review queue: {review}",
+        f"- Classification engine: {plan.get('classification_engine', 'deterministic')}",
+        f"- Gemini enabled: {str((plan.get('gemini') or {}).get('enabled', False)).lower()}",
+        f"- Partial due to Gemini quota: {str(plan.get('partial', False)).lower()}",
         "",
         "## Items",
         "",
@@ -1811,6 +1922,8 @@ def write_classification_report(plan: dict[str, Any], markdown_output: Path, csv
                 "target_collections": "; ".join(row.get("target_collections", [])),
                 "tags": "; ".join(row.get("normalized_tags", [])),
                 "confidence": row.get("confidence"),
+                "gemini_used": row.get("gemini_used", False),
+                "gemini_rejected": row.get("gemini_rejected", False),
             }
             for row in rows
         ]

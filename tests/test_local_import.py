@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from paperflow.local_import import (
@@ -15,6 +16,37 @@ def _pdf(path: Path, content: bytes = b"%PDF-1.4\nlocal import test\n") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
+
+
+class FakeGemini:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = payloads
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> dict:
+        self.prompts.append(prompt)
+        payload = self.payloads.pop(0)
+        if "error_type" in payload:
+            return {"ok": False, **payload}
+        return {
+            "ok": True,
+            "raw": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": json.dumps(payload),
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+
+    def close(self) -> None:
+        pass
 
 
 def test_local_scan_skips_hidden_temp_zero_and_duplicate_hash(tmp_path: Path) -> None:
@@ -271,3 +303,144 @@ def test_local_plan_import_uses_area_year_and_linked_local(tmp_path: Path) -> No
     assert "/Battery ML & Prognostics - RUL & SOH Estimation/2025/" in item["planned_vault_path"]
     assert item["planned_filename"].endswith("[arXiv 2501.12345v1].pdf")
     assert "paperflow/source-local-import" in item["planned_tags"]
+
+
+def test_gemini_fallback_is_not_called_by_default() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/unclear.pdf",
+                "filename": "unclear.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Unclear Paper", "year": 2025, "abstract_present": True},
+                "first_pages_text": "no deterministic taxonomy evidence",
+                "first_page_abstract_candidate": "no deterministic taxonomy evidence but enough text",
+            }
+        ]
+    }
+    fake = FakeGemini([])
+
+    plan = classify_new_local_papers(scan, {"matches": []}, gemini_client=fake)
+
+    assert plan["classification_engine"] == "deterministic"
+    assert fake.prompts == []
+    assert plan["items"][0]["gemini_used"] is False
+
+
+def test_gemini_fallback_accepts_valid_taxonomy_json() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/ambiguous.pdf",
+                "filename": "ambiguous.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Sparse Evidence", "year": 2025, "abstract_present": True},
+                "first_pages_text": "paper with sparse evidence",
+                "first_page_abstract_candidate": "paper with sparse evidence",
+            }
+        ]
+    }
+    fake = FakeGemini(
+        [
+            {
+                "primary_collection": "AI Library/20 Areas/Vision-Language Models/Prompt Learning & Adapters",
+                "secondary_collections": [],
+                "tags": ["area/vlm", "method/adapter", "method/prompt-learning", "type/method", "source/local-pdf"],
+                "confidence": 0.88,
+                "evidence": [{"source": "abstract", "quote": "adapter method"}],
+                "rationale": "The supplied evidence indicates VLM adapters.",
+                "needs_review": False,
+            }
+        ]
+    )
+
+    plan = classify_new_local_papers(scan, {"matches": []}, use_gemini=True, gemini_client=fake)
+    item = plan["items"][0]
+
+    assert fake.prompts
+    assert "Allowed collection tree" in fake.prompts[0]
+    assert item["gemini_used"] is True
+    assert item["target_collections"] == [
+        "AI Library/20 Areas/Vision-Language Models/Prompt Learning & Adapters"
+    ]
+    assert "method/adapter" in item["normalized_tags"]
+
+
+def test_gemini_fallback_rejects_unknown_collection() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/ambiguous.pdf",
+                "filename": "ambiguous.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Unknown Paper", "year": 2025, "abstract_present": True},
+                "first_pages_text": "no deterministic taxonomy evidence",
+                "first_page_abstract_candidate": "no deterministic taxonomy evidence",
+            }
+        ]
+    }
+    fake = FakeGemini(
+        [
+            {
+                "primary_collection": "AI Library/20 Areas/Made Up Area",
+                "secondary_collections": [],
+                "tags": ["area/vlm"],
+                "confidence": 0.91,
+                "evidence": [],
+                "rationale": "invalid",
+                "needs_review": False,
+            }
+        ]
+    )
+
+    plan = classify_new_local_papers(scan, {"matches": []}, use_gemini=True, gemini_client=fake)
+    item = plan["items"][0]
+
+    assert item["gemini_used"] is False
+    assert item["gemini_rejected"] is True
+    assert "AI Library/05 Review Queue/Ambiguous Classification" in item["target_collections"]
+    assert "unknown primary collection" in item["gemini_rejection_reason"]
+
+
+def test_gemini_quota_stops_batch_and_writes_partial_plan() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/first.pdf",
+                "filename": "first.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "First", "year": 2025, "abstract_present": True},
+                "first_pages_text": "unclear",
+                "first_page_abstract_candidate": "unclear",
+            },
+            {
+                "path": "/tmp/second.pdf",
+                "filename": "second.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Second", "year": 2025, "abstract_present": True},
+                "first_pages_text": "unclear",
+                "first_page_abstract_candidate": "unclear",
+            },
+        ]
+    }
+    fake = FakeGemini(
+        [
+            {
+                "error_type": "rate_limited",
+                "message": "Gemini quota/rate limit reached",
+            }
+        ]
+    )
+
+    plan = classify_new_local_papers(
+        scan,
+        {"matches": []},
+        use_gemini=True,
+        gemini_client=fake,
+        stop_on_gemini_quota=True,
+    )
+
+    assert plan["partial"] is True
+    assert plan["gemini"]["stopped_due_to_quota"] is True
+    assert len(plan["items"]) == 1
+    assert plan["items"][0]["classification_action"] == "review"
