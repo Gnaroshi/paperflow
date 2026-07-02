@@ -12,6 +12,9 @@ struct LocalFolderImportView: View {
     @State private var editRow: LocalImportRow?
     @State private var editMode: EditMode?
     @State private var editText = ""
+    @State private var correctRow: LocalImportRow?
+    @State private var correctCollectionText = ""
+    @State private var correctTagsText = ""
 
     private enum EditMode {
         case collection
@@ -76,6 +79,9 @@ struct LocalFolderImportView: View {
         }
         .sheet(item: $editRow) { row in
             editSheet(row)
+        }
+        .sheet(item: $correctRow) { row in
+            correctClassificationSheet(row)
         }
     }
 
@@ -178,7 +184,7 @@ struct LocalFolderImportView: View {
     }
 
     private var localEditNotice: some View {
-        WarningBox(text: "Per-row edit/mark buttons are local UI review overrides for planning discussion. Backend row-edit persistence is not implemented yet; re-run plan commands before applying.")
+        WarningBox(text: "Correct classification saves a reusable YAML rule and re-runs classification. The Edit/Mark menu remains a local review override; re-run plan commands before applying.")
     }
 
     private var resultsTable: some View {
@@ -194,7 +200,7 @@ struct LocalFolderImportView: View {
                         Divider()
                     }
                 }
-                .frame(minWidth: 1780, alignment: .leading)
+                .frame(minWidth: 1900, alignment: .leading)
             }
             .frame(minHeight: 360)
             .background(Color(nsColor: .textBackgroundColor))
@@ -216,7 +222,7 @@ struct LocalFolderImportView: View {
             headerCell("confidence", width: 90)
             headerCell("planned vault path", width: 260)
             headerCell("action", width: 180)
-            headerCell("row actions", width: 500)
+            headerCell("row actions", width: 620)
         }
         .background(Color(nsColor: .controlBackgroundColor))
     }
@@ -234,7 +240,7 @@ struct LocalFolderImportView: View {
             textCell(row.confidence > 0 ? String(format: "%.2f", row.confidence) : "-", width: 90)
             textCell(row.plannedVaultPath.isEmpty ? row.copiedFilePath : row.plannedVaultPath, width: 260, monospaced: true)
             textCell(effectiveAction(for: row), width: 180)
-            actionCell(row, width: 500)
+            actionCell(row, width: 620)
         }
     }
 
@@ -265,6 +271,11 @@ struct LocalFolderImportView: View {
             Button("Zotero") { state.openZoteroItem(itemKey: row.matchedZoteroItem) }
                 .disabled(row.matchedZoteroItem.isEmpty)
             Button("Explain") { detailRow = row }
+            Button("Correct classification") {
+                correctCollectionText = effectivePrimaryCollection(for: row)
+                correctTagsText = effectiveTags(for: row)
+                correctRow = row
+            }
             Menu("Edit") {
                 Button("Edit target collection") {
                     editMode = .collection
@@ -342,6 +353,42 @@ struct LocalFolderImportView: View {
         }
         .padding()
         .frame(width: 560)
+    }
+
+    private func correctClassificationSheet(_ row: LocalImportRow) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Correct Classification")
+                .font(.title3)
+                .fontWeight(.semibold)
+            Text(row.title)
+                .font(.headline)
+                .textSelection(.enabled)
+            Text("Save this correction as a reusable user taxonomy rule. PaperFlow will append it to `config/user_taxonomy_overrides.yaml` and re-run local pending classification.")
+                .foregroundStyle(.secondary)
+            TextField("Target collection", text: $correctCollectionText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...4)
+            TextField("Tags separated by semicolons or commas", text: $correctTagsText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3...6)
+            HStack {
+                Spacer()
+                Button("Cancel") { correctRow = nil }
+                Button("Save as Rule") {
+                    manualCollections[row.id] = correctCollectionText
+                    manualTags[row.id] = correctTagsText
+                    state.saveUserClassificationOverrideRule(
+                        row: row,
+                        collection: correctCollectionText,
+                        tagsText: correctTagsText
+                    )
+                    correctRow = nil
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(width: 640)
     }
 
     private func effectiveAction(for row: LocalImportRow) -> String {

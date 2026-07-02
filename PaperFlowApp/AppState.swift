@@ -880,6 +880,71 @@ final class AppState: ObservableObject {
         runUV(arguments: args, timeoutSeconds: 3600)
     }
 
+    func saveUserClassificationOverrideRule(
+        row: LocalImportRow,
+        collection: String,
+        tagsText: String
+    ) {
+        let cleanedCollection = collection.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tags = tagsText
+            .split { character in character == ";" || character == "," || character == "\n" || character == "\t" }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleanedCollection.isEmpty || !tags.isEmpty else {
+            invalidDropWarnings = ["Enter at least one collection or tag before saving a taxonomy rule."]
+            return
+        }
+        let title = row.title == "(untitled)" ? URL(fileURLWithPath: row.localPath).deletingPathExtension().lastPathComponent : row.title
+        let titleNeedle = normalizedRuleNeedle(title)
+        guard !titleNeedle.isEmpty else {
+            invalidDropWarnings = ["Cannot create taxonomy rule because this row has no usable title."]
+            return
+        }
+        let configURL = projectURL.appendingPathComponent("config", isDirectory: true)
+        let overridesURL = configURL.appendingPathComponent("user_taxonomy_overrides.yaml")
+        do {
+            try FileManager.default.createDirectory(at: configURL, withIntermediateDirectories: true)
+            var content = ""
+            if FileManager.default.fileExists(atPath: overridesURL.path) {
+                content = try String(contentsOf: overridesURL, encoding: .utf8)
+            }
+            if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                content = "rules:\n"
+            }
+            if !content.contains("rules:") {
+                content = "rules:\n" + content
+            }
+            if !content.hasSuffix("\n") {
+                content += "\n"
+            }
+            var rule = """
+              - name: \(yamlQuoted("User override - \(title)"))
+                when:
+                  title_contains:
+                    - \(yamlQuoted(titleNeedle))
+                collections:
+            """
+            if cleanedCollection.isEmpty {
+                rule += "      []\n"
+            } else {
+                rule += "      - \(yamlQuoted(cleanedCollection))\n"
+            }
+            rule += "    tags:\n"
+            if tags.isEmpty {
+                rule += "      []\n"
+            } else {
+                for tag in tags {
+                    rule += "      - \(yamlQuoted(tag))\n"
+                }
+            }
+            try (content + rule).write(to: overridesURL, atomically: true, encoding: .utf8)
+            invalidDropWarnings = ["Saved taxonomy override rule to \(overridesURL.path). Re-running local classification."]
+            runLocalFolderClassifyNew()
+        } catch {
+            invalidDropWarnings = ["Failed to save taxonomy override rule: \(error.localizedDescription)"]
+        }
+    }
+
     func runLocalFolderPlanImport() {
         runUV(arguments: ["run", "paperflow", "local", "plan-import"], timeoutSeconds: 1800)
     }
@@ -1386,6 +1451,20 @@ final class AppState: ObservableObject {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private func yamlQuoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    private func normalizedRuleNeedle(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func defaultProjectPath() -> String {

@@ -75,10 +75,13 @@ from paperflow.local_import import (
     audit_local_import,
     build_zotero_index,
     cleanup_source_files,
+    classification_evidence,
+    classify_scan_row,
     classify_new_local_papers,
     local_scan,
     match_local_to_zotero,
     plan_local_import,
+    scan_pdf_metadata,
     validate_local_apply,
     validate_source_cleanup,
     write_classification_report,
@@ -115,6 +118,18 @@ from paperflow.rollback import (
     validate_rollback_request,
     write_rollback_plan,
 )
+from paperflow.taxonomy_overrides import (
+    DEFAULT_EVALUATION_JSON_PATH,
+    DEFAULT_EVALUATION_REPORT_PATH,
+    DEFAULT_GOLDEN_SET_PATH,
+    build_golden_set_from_files,
+    evaluate_golden_set,
+    find_zotero_item_for_explain,
+    item_key_to_scan_row,
+    validate_user_taxonomy_overrides,
+    write_golden_set,
+    write_taxonomy_evaluation_report,
+)
 from paperflow.utils import dump_json_data, read_json_model, write_jsonl
 from paperflow.vault import (
     DEFAULT_VAULT_LIBRARY,
@@ -146,11 +161,13 @@ vault_app = typer.Typer(help="Local-first PDF vault commands.")
 local_app = typer.Typer(help="Local recursive paper import commands.")
 credentials_app = typer.Typer(help="Credential verification commands.")
 cleanup_app = typer.Typer(help="Cleanup workbench commands.")
+taxonomy_app = typer.Typer(help="Taxonomy v3 override, explain, and evaluation commands.")
 app.add_typer(zotero_app, name="zotero")
 app.add_typer(vault_app, name="vault")
 app.add_typer(local_app, name="local")
 app.add_typer(credentials_app, name="credentials")
 app.add_typer(cleanup_app, name="cleanup")
+app.add_typer(taxonomy_app, name="taxonomy")
 
 
 class ApplyModeOption(StrEnum):
@@ -716,6 +733,119 @@ def _read_json_or_exit(path: Path, label: str) -> dict:
     except Exception as exc:
         console.print(f"[bold red]Could not read {label}: {exc}[/bold red]")
         raise typer.Exit(2)
+
+
+def _read_json_optional(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@taxonomy_app.command("explain")
+def taxonomy_explain_command(
+    pdf_or_item_key: str = typer.Argument(..., help="PDF path or Zotero item key to classify/explain."),
+) -> None:
+    """Explain taxonomy v3 classification for a local PDF or cached Zotero item key."""
+
+    target_path = Path(pdf_or_item_key).expanduser()
+    errors: list[str] = []
+    target_type = "zotero_item"
+    if target_path.exists():
+        if not target_path.is_file() or target_path.suffix.lower() != ".pdf":
+            console.print(f"[bold red]Expected a PDF file path: {target_path}[/bold red]")
+            raise typer.Exit(2)
+        metadata, errors = scan_pdf_metadata(target_path)
+        row = {
+            "path": str(target_path.resolve()),
+            "filename": target_path.name,
+            "size_bytes": target_path.stat().st_size,
+            **metadata,
+        }
+        target_type = "pdf"
+    else:
+        item = find_zotero_item_for_explain(pdf_or_item_key)
+        if not item:
+            console.print(
+                "[bold red]Could not find PDF path or cached Zotero item key. "
+                "Run `paperflow zotero enrich-metadata` or pass a PDF path.[/bold red]"
+            )
+            raise typer.Exit(2)
+        row = item_key_to_scan_row(item)
+
+    classification = classify_scan_row(row)
+    evidence = classification_evidence(row)
+    console.print_json(
+        data={
+            "schema_version": "1.0",
+            "target": pdf_or_item_key,
+            "target_type": target_type,
+            "classification": classification,
+            "evidence": {
+                key: value
+                for key, value in evidence.items()
+                if key not in {"full_text", "main_text"}
+            },
+            "errors": errors,
+        }
+    )
+
+
+@taxonomy_app.command("test")
+def taxonomy_test_command(
+    overrides_path: Path = typer.Option(
+        Path("config/user_taxonomy_overrides.yaml"),
+        "--overrides",
+        help="User taxonomy override YAML to validate.",
+    ),
+) -> None:
+    """Validate taxonomy v3 user override rules."""
+
+    result = validate_user_taxonomy_overrides(overrides_path)
+    console.print_json(data=result)
+    if not result["ok"]:
+        raise typer.Exit(2)
+
+
+@taxonomy_app.command("export-golden-set")
+def taxonomy_export_golden_set_command(
+    scan_path: Path = typer.Option(Path("data/local_scan.json"), "--scan", help="Local scan JSON input."),
+    classification_path: Path = typer.Option(
+        Path("data/local_classification_plan.json"),
+        "--classification",
+        help="Local classification plan input.",
+    ),
+    output_path: Path = typer.Option(DEFAULT_GOLDEN_SET_PATH, "--output", "-o", help="Golden-set JSON output."),
+) -> None:
+    """Export current local classifications as a user-editable taxonomy golden set."""
+
+    scan = _read_json_optional(scan_path)
+    classification = _read_json_optional(classification_path)
+    if classification is None:
+        console.print(f"[bold red]classification plan not found: {classification_path}[/bold red]")
+        raise typer.Exit(2)
+    golden_set = build_golden_set_from_files(scan, classification)
+    write_golden_set(output_path, golden_set)
+    console.print(f"Wrote {len(golden_set['examples'])} taxonomy golden examples to {output_path}.")
+
+
+@taxonomy_app.command("evaluate-golden-set")
+def taxonomy_evaluate_golden_set_command(
+    golden_set_path: Path = typer.Option(DEFAULT_GOLDEN_SET_PATH, "--golden-set", help="Golden-set JSON input."),
+    output_path: Path = typer.Option(DEFAULT_EVALUATION_JSON_PATH, "--output", "-o", help="Evaluation JSON output."),
+    report_path: Path = typer.Option(DEFAULT_EVALUATION_REPORT_PATH, "--report", help="Evaluation markdown report."),
+) -> None:
+    """Evaluate taxonomy v3 classifier and user overrides against the golden set."""
+
+    golden_set = _read_json_or_exit(golden_set_path, "taxonomy golden set")
+    evaluation = evaluate_golden_set(golden_set, classify_scan_row)
+    dump_json_data(output_path, evaluation)
+    write_taxonomy_evaluation_report(evaluation, report_path)
+    console.print(
+        f"Evaluated {evaluation['total']} taxonomy examples: "
+        f"{evaluation['passed']} passed, {evaluation['failed']} failed."
+    )
+    if evaluation["failed"]:
+        raise typer.Exit(1)
 
 
 @local_app.command("scan")

@@ -49,6 +49,7 @@ from paperflow.taxonomy_v3 import (
     normalize_title_v3,
     unique_preserve_order,
 )
+from paperflow.taxonomy_overrides import override_candidates_for_evidence, rag_unless_contains_terms
 from paperflow.utils import ensure_parent_dir
 from paperflow.vault import DEFAULT_VAULT_LIBRARY, safe_pdf_filename
 from paperflow.zotero_local import (
@@ -1270,6 +1271,8 @@ def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> 
     candidates: list[dict[str, Any]] = []
     tags = ["status/to-read", _source_tag(row, evidence), "type/method"]
 
+    candidates.extend(override_candidates_for_evidence(evidence))
+
     if "looped world models" in title or "first looped architectures for world modelling" in abstract:
         candidates.extend(
             [
@@ -1869,6 +1872,9 @@ def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> 
 
 def strict_rag_signal(text: str) -> bool:
     non_reference_text = _text_before_references(text).lower()
+    override_required_terms = rag_unless_contains_terms()
+    if override_required_terms and not _contains_any(non_reference_text, override_required_terms):
+        return False
     patterns = (
         "retrieval augmented generation",
         "retrieval-augmented generation",

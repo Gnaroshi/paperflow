@@ -1,0 +1,40 @@
+rules:
+  - name: "Looped World Models"
+    when:
+      title_contains:
+        - "looped world model"
+      abstract_contains_any:
+        - "looped architectures"
+        - "world modelling"
+    collections:
+      - "AI Library/20 Areas/World Models & Simulation/Latent World Models"
+      - "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers"
+    tags:
+      - area/world-models
+      - area/recurrent-adaptive-computation
+      - method/world-model
+      - method/looped-transformer
+      - method/adaptive-computation
+
+  - name: "Battery degradation"
+    when:
+      text_contains_any:
+        - "battery degradation"
+        - "cycle life"
+        - "state of health"
+        - "remaining useful life"
+        - "thermal runaway"
+    collections:
+      - "AI Library/20 Areas/Battery ML & Prognostics"
+    tags:
+      - area/battery-ml
+
+  - name: "No false RAG"
+    negative:
+      rag_unless_contains_any:
+        - "retrieval-augmented generation"
+        - "retriever"
+        - "document retrieval"
+        - "passage retrieval"
+        - "dense retrieval"
+        - "knowledge base retrieval"
