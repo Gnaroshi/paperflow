@@ -5,9 +5,9 @@ import Foundation
 final class GlobalHotkeyManager {
     private enum HotkeyID: UInt32 {
         case commandWindow = 1
-        case dropShelfEqual = 2
+        case dropShelfPrimary = 2
         case finderSelectionIngest = 3
-        case dropShelfKeypadPlus = 4
+        case dropShelfSecondary = 4
     }
 
     private var handlerRef: EventHandlerRef?
@@ -60,9 +60,8 @@ final class GlobalHotkeyManager {
             return
         }
 
-        registerKey(UInt32(kVK_Space), modifiers: UInt32(optionKey), id: .commandWindow)
-        registerKey(UInt32(kVK_ANSI_Equal), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfEqual)
-        registerKey(UInt32(kVK_ANSI_KeypadPlus), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfKeypadPlus)
+        registerCommandShortcut(state.commandShortcutPreset)
+        registerDropShelfShortcut(state.dropShelfShortcutPreset)
         registerKey(UInt32(kVK_ANSI_I), modifiers: UInt32(optionKey | shiftKey), id: .finderSelectionIngest)
     }
 
@@ -97,6 +96,31 @@ final class GlobalHotkeyManager {
         }
     }
 
+    private func registerCommandShortcut(_ preset: CommandShortcutPreset) {
+        switch preset {
+        case .optionSpace:
+            registerKey(UInt32(kVK_Space), modifiers: UInt32(optionKey), id: .commandWindow)
+        case .controlSpace:
+            registerKey(UInt32(kVK_Space), modifiers: UInt32(controlKey), id: .commandWindow)
+        case .optionCommandSpace:
+            registerKey(UInt32(kVK_Space), modifiers: UInt32(optionKey | cmdKey), id: .commandWindow)
+        }
+    }
+
+    private func registerDropShelfShortcut(_ preset: DropShelfShortcutPreset) {
+        switch preset {
+        case .controlShiftCommandPlus:
+            registerKey(UInt32(kVK_ANSI_Equal), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfPrimary)
+            registerKey(UInt32(kVK_ANSI_KeypadPlus), modifiers: UInt32(controlKey | shiftKey | cmdKey), id: .dropShelfSecondary)
+        case .optionShiftD:
+            registerKey(UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey | shiftKey), id: .dropShelfPrimary)
+        case .controlOptionD:
+            registerKey(UInt32(kVK_ANSI_D), modifiers: UInt32(controlKey | optionKey), id: .dropShelfPrimary)
+        case .controlOptionSpace:
+            registerKey(UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey), id: .dropShelfPrimary)
+        }
+    }
+
     private func handleHotkey(id: UInt32) {
         guard let hotkey = HotkeyID(rawValue: id) else {
             return
@@ -104,7 +128,7 @@ final class GlobalHotkeyManager {
         switch hotkey {
         case .commandWindow:
             AppServices.shared.commandPopupWindow?.toggle()
-        case .dropShelfEqual, .dropShelfKeypadPlus:
+        case .dropShelfPrimary, .dropShelfSecondary:
             AppServices.shared.shelfController?.toggleShelf()
         case .finderSelectionIngest:
             state?.invalidDropWarnings = ["Finder selection ingest is planned but not implemented yet."]

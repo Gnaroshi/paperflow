@@ -85,7 +85,7 @@ struct CommandPaletteView: View {
             }
             .padding(16)
 
-            Divider()
+            softSeparator
 
             ScrollView {
                 LazyVStack(spacing: 4) {
@@ -127,7 +127,7 @@ struct CommandPaletteView: View {
             }
 
             if selectedAction?.destructive == true {
-                Divider()
+                softSeparator
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Apply Migration requires confirmation")
                         .font(.caption)
@@ -138,7 +138,7 @@ struct CommandPaletteView: View {
                 .padding(12)
             }
 
-            Divider()
+            softSeparator
             HStack {
                 Text("Enter runs selected dry-run action. Escape closes.")
                     .font(.caption)
@@ -149,8 +149,9 @@ struct CommandPaletteView: View {
             .padding(12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
+        .background(commandBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color(red: 0.24, green: 0.18, blue: 0.42).opacity(0.18), radius: 26, x: 0, y: 18)
         .onAppear {
             searchFocused = true
             selectedID = filteredActions.first?.id ?? selectedID
@@ -171,6 +172,29 @@ struct CommandPaletteView: View {
         }
         action.run()
         onClose()
+    }
+
+    private var softSeparator: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.34))
+            .frame(height: 1)
+    }
+
+    private var commandBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.95, green: 0.96, blue: 1.0),
+                    Color(red: 1.0, green: 0.94, blue: 0.97),
+                    Color(red: 0.92, green: 0.98, blue: 0.96)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Rectangle()
+                .fill(.regularMaterial)
+                .opacity(0.78)
+        }
     }
 }
 

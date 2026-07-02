@@ -22,7 +22,7 @@ final class MenuBarController: NSObject {
             button.toolTip = "PaperFlow - \(state.statusText)"
         }
         let menu = NSMenu()
-        menu.addItem(item("Show Drop Shelf", #selector(showDropShelf)))
+        menu.addItem(item("Toggle Drop Shelf", #selector(showDropShelf)))
         menu.addItem(item("Show Command Window", #selector(showCommandWindow)))
         menu.addItem(item("Open Main Window", #selector(openMainWindow)))
         menu.addItem(item("Open Cleanup Workbench", #selector(openCleanupWorkbench)))
@@ -60,7 +60,7 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func showDropShelf() {
-        AppServices.shared.shelfController?.showExpanded()
+        AppServices.shared.shelfController?.toggleShelf()
     }
 
     @objc private func showCommandWindow() {

@@ -66,8 +66,7 @@ struct DropShelfView: View {
         VStack(alignment: .leading, spacing: 0) {
             pfwHeader
 
-            Divider()
-                .opacity(0.18)
+            softSeparator
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -78,8 +77,7 @@ struct DropShelfView: View {
             }
             .scrollIndicators(.automatic)
 
-            Divider()
-                .opacity(0.18)
+            softSeparator
 
             pfwFooter
         }
@@ -88,16 +86,21 @@ struct DropShelfView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(borderColor.opacity(dragHighlightActive ? 0.95 : 0.35), lineWidth: dragHighlightActive ? 2 : 1)
+                .stroke(Color.white.opacity(dragHighlightActive ? 0.58 : 0.26), lineWidth: dragHighlightActive ? 1.5 : 1)
         )
-        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.35 : 0.18), radius: dragHighlightActive ? 22 : 16, x: 0, y: 10)
+        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.34 : 0.16), radius: dragHighlightActive ? 30 : 22, x: 0, y: 14)
         .scaleEffect(dragHighlightActive ? 1.015 : 1)
         .animation(.easeOut(duration: 0.16), value: dragHighlightActive)
     }
 
     private var pfwHeader: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+            Button {
+                if !state.runner.isRunning {
+                    controller.hideShelf()
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
                 Text(state.dropShelfPhase.label)
                     .font(.headline)
                 Text(state.shelfLastResult)
@@ -105,7 +108,10 @@ struct DropShelfView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                }
             }
+            .buttonStyle(.plain)
+            .help("Click to hide PFW")
             Spacer(minLength: 8)
             Picker("PFW mode", selection: $mode) {
                 ForEach(PFWMode.allCases) { mode in
@@ -391,9 +397,18 @@ struct DropShelfView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.62),
+                    Color.white.opacity(0.20),
+                    Color(red: 0.70, green: 0.82, blue: 1.0).opacity(0.16)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             Rectangle()
                 .fill(.regularMaterial)
-                .opacity(0.72)
+                .opacity(0.66)
         }
     }
 
@@ -423,37 +438,43 @@ struct DropShelfView: View {
         let border: Color
 
         static let idle = PFWTheme(
-            background: [Color(red: 0.92, green: 0.94, blue: 0.98), Color(red: 0.98, green: 0.94, blue: 0.97)],
-            border: Color(red: 0.52, green: 0.58, blue: 0.68)
+            background: [Color(red: 0.93, green: 0.95, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.98), Color(red: 0.91, green: 0.99, blue: 0.96)],
+            border: Color(red: 0.46, green: 0.48, blue: 0.82)
         )
         static let queued = PFWTheme(
-            background: [Color(red: 0.88, green: 0.94, blue: 1.0), Color(red: 0.95, green: 0.92, blue: 1.0)],
-            border: Color(red: 0.32, green: 0.48, blue: 0.88)
+            background: [Color(red: 0.86, green: 0.94, blue: 1.0), Color(red: 0.98, green: 0.92, blue: 1.0), Color(red: 0.92, green: 0.99, blue: 0.94)],
+            border: Color(red: 0.32, green: 0.42, blue: 0.90)
         )
         static let validDrop = PFWTheme(
-            background: [Color(red: 0.84, green: 0.98, blue: 0.92), Color(red: 0.86, green: 0.94, blue: 1.0)],
-            border: Color(red: 0.12, green: 0.66, blue: 0.64)
+            background: [Color(red: 0.78, green: 0.98, blue: 0.91), Color(red: 0.84, green: 0.94, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.82)],
+            border: Color(red: 0.12, green: 0.68, blue: 0.62)
         )
         static let invalidDrop = PFWTheme(
-            background: [Color(red: 1.0, green: 0.90, blue: 0.84), Color(red: 1.0, green: 0.96, blue: 0.78)],
+            background: [Color(red: 1.0, green: 0.88, blue: 0.84), Color(red: 1.0, green: 0.96, blue: 0.76), Color(red: 0.96, green: 0.90, blue: 1.0)],
             border: Color(red: 0.92, green: 0.32, blue: 0.24)
         )
         static let processing = PFWTheme(
-            background: [Color(red: 0.91, green: 0.90, blue: 1.0), Color(red: 0.86, green: 0.95, blue: 1.0)],
+            background: [Color(red: 0.90, green: 0.89, blue: 1.0), Color(red: 0.82, green: 0.96, blue: 1.0), Color(red: 1.0, green: 0.92, blue: 0.98)],
             border: Color(red: 0.44, green: 0.44, blue: 0.92)
         )
         static let success = PFWTheme(
-            background: [Color(red: 0.84, green: 0.98, blue: 0.90), Color(red: 0.92, green: 0.98, blue: 0.86)],
+            background: [Color(red: 0.80, green: 0.98, blue: 0.90), Color(red: 0.90, green: 0.99, blue: 0.82), Color(red: 0.84, green: 0.94, blue: 1.0)],
             border: Color(red: 0.12, green: 0.64, blue: 0.38)
         )
         static let failure = PFWTheme(
-            background: [Color(red: 1.0, green: 0.88, blue: 0.91), Color(red: 0.98, green: 0.90, blue: 0.96)],
+            background: [Color(red: 1.0, green: 0.86, blue: 0.90), Color(red: 1.0, green: 0.92, blue: 0.98), Color(red: 0.94, green: 0.92, blue: 1.0)],
             border: Color(red: 0.86, green: 0.22, blue: 0.36)
         )
         static let warning = PFWTheme(
-            background: [Color(red: 1.0, green: 0.96, blue: 0.78), Color(red: 1.0, green: 0.90, blue: 0.78)],
+            background: [Color(red: 1.0, green: 0.96, blue: 0.76), Color(red: 1.0, green: 0.90, blue: 0.78), Color(red: 0.92, green: 0.96, blue: 1.0)],
             border: Color(red: 0.86, green: 0.52, blue: 0.12)
         )
+    }
+
+    private var softSeparator: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.30))
+            .frame(height: 1)
     }
 
     private var processingView: some View {

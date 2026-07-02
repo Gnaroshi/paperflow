@@ -8,251 +8,319 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("PaperFlow") {
-                HStack {
-                    TextField("paperflow project directory", text: $state.projectPath)
-                    Button("Choose") { state.chooseProjectDirectory() }
-                }
-                HStack {
-                    TextField("uv path", text: $state.uvPath)
-                    Button("Choose") { state.chooseUVExecutable() }
-                }
-                HStack {
-                    TextField("vault path", text: $state.vaultPath)
-                    Button("Choose") { state.chooseVaultDirectory() }
-                }
-                Picker("Default ingest mode", selection: $state.defaultMode) {
-                    ForEach(DefaultRunMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Picker("Storage mode", selection: $state.storageModeSetting) {
-                    ForEach(StorageModeSetting.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                Toggle("Never upload PDFs to Zotero Storage", isOn: $state.neverUploadPDFsToZoteroStorage)
-            }
-
-            Section("Drop Shelf") {
-                Picker("Activation mode", selection: $state.dropShelfActivationMode) {
-                    ForEach(DropShelfActivationMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                StatusLine(label: "Shortcut", value: state.dropShelfShortcut)
-                Picker("Show on", selection: $state.displayMode) {
-                    ForEach(DisplayMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                Picker("Placement", selection: $state.dropShelfPlacement) {
-                    ForEach(DropShelfPlacement.allCases) { placement in
-                        Text(placement.label).tag(placement)
-                    }
-                }
-                Toggle("Show PFW across Spaces", isOn: $state.showPFWAcrossSpaces)
-                Picker("Focused monitor strategy", selection: $state.focusedMonitorStrategy) {
-                    ForEach(FocusedMonitorStrategy.allCases) { strategy in
-                        Text(strategy.label).tag(strategy)
-                    }
-                }
-                Toggle("Auto-hide after successful dry-run/apply", isOn: $state.autoHideAfterSuccess)
-                Stepper("Auto-hide after \(Int(state.autoCollapseDelay)) seconds idle", value: $state.autoCollapseDelay, in: 1...20, step: 1)
-                Toggle("Auto dry-run after drop", isOn: $state.autoDryRunAfterDrop)
-                Toggle("Enable hot-zone", isOn: $state.hotZoneEnabled)
-                Picker("Edge", selection: $state.hotZoneEdge) {
-                    ForEach(HotZoneEdge.allCases) { edge in
-                        Text(edge.rawValue).tag(edge)
-                    }
-                }
-                Picker("Corner", selection: $state.hotZoneCorner) {
-                    ForEach(HotZoneCorner.allCases) { corner in
-                        Text(corner.label).tag(corner)
-                    }
-                }
-                Stepper("Hot-zone width: \(Int(state.hotZoneWidth)) px", value: $state.hotZoneWidth, in: 6...80, step: 2)
-                Stepper("Hot-zone height: \(Int(state.hotZoneHeight)) px", value: $state.hotZoneHeight, in: 80...360, step: 10)
-                Slider(value: $state.hotZoneIdleOpacity, in: 0.02...0.60) {
-                    Text("Idle opacity")
-                }
-                Text("Hot-zone is inactive unless Activation mode is Hot-Zone on Hover.")
-                    .font(.caption)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle("Settings")
+                Text("경로, 단축키, 계정, Gemini, 로컬 vault 정책을 한 곳에서 관리합니다. API key 원문은 Dashboard와 로그에 표시하지 않습니다.")
                     .foregroundStyle(.secondary)
-            }
 
-            Section("Global Shortcuts") {
-                TextField("Command window shortcut", text: $state.globalShortcutCommand)
-                    .disabled(true)
-                StatusLine(label: "Drop shelf", value: state.dropShelfShortcut)
-                Text("Option + Shift + I: Finder selection ingest placeholder")
-                    .foregroundStyle(.secondary)
-                Text("Custom shortcut capture UI is planned; defaults are active through Carbon hot keys.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Zotero Migration Defaults") {
-                Picker("Collection mode", selection: $state.collectionMode) {
-                    ForEach(CollectionMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                settingsCard(title: "PaperFlow", icon: "folder") {
+                    pathRow("Project directory", text: $state.projectPath, actionTitle: "Choose", action: state.chooseProjectDirectory)
+                    pathRow("uv executable", text: $state.uvPath, actionTitle: "Choose", action: state.chooseUVExecutable)
+                    pathRow("Local vault", text: $state.vaultPath, actionTitle: "Choose", action: state.chooseVaultDirectory)
+                    settingRow("Default ingest") {
+                        Picker("Default ingest", selection: $state.defaultMode) {
+                            ForEach(DefaultRunMode.allCases) { mode in Text(mode.label).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 320)
                     }
-                }
-                Picker("Tag mode", selection: $state.tagMode) {
-                    ForEach(TagMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                    settingRow("Storage mode") {
+                        Picker("Storage mode", selection: $state.storageModeSetting) {
+                            ForEach(StorageModeSetting.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 360)
                     }
-                }
-                Text("Apply still requires typed confirmation before any write.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Accounts & API Keys") {
-                Picker("API key storage", selection: $state.apiKeyStorageMode) {
-                    ForEach(APIKeyStorageMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
+                    Toggle("Never upload PDFs to Zotero Storage", isOn: $state.neverUploadPDFsToZoteroStorage)
                 }
 
-                Text("Zotero")
-                    .font(.headline)
-                Text("The Zotero Web API requires the numeric user ID. Email addresses and usernames do not work for write calls.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("Numeric Zotero User ID", text: $state.zoteroUserID)
-                    .textFieldStyle(.roundedBorder)
-                if state.apiKeyStorageMode == .keychain {
-                    SecureField("Zotero API Key", text: $state.pendingZoteroAPIKey)
-                        .textFieldStyle(.roundedBorder)
-                    HStack {
-                        Text("Stored Zotero key")
-                        Spacer()
-                        Text(state.redactedAPIKey)
+                settingsCard(title: "Drop Shelf", icon: "tray.and.arrow.down") {
+                    settingRow("Activation") {
+                        Picker("Activation mode", selection: $state.dropShelfActivationMode) {
+                            ForEach(DropShelfActivationMode.allCases) { mode in Text(mode.label).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
+                    }
+                    settingRow("Drop shelf shortcut") {
+                        Picker("Drop shelf shortcut", selection: $state.dropShelfShortcutPreset) {
+                            ForEach(DropShelfShortcutPreset.allCases) { preset in Text(preset.label).tag(preset) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 360)
+                    }
+                    helperText(state.dropShelfShortcutPreset.detail)
+                    settingRow("Show on") {
+                        Picker("Show on", selection: $state.displayMode) {
+                            ForEach(DisplayMode.allCases) { mode in Text(mode.label).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
+                    }
+                    settingRow("Placement") {
+                        Picker("Placement", selection: $state.dropShelfPlacement) {
+                            ForEach(DropShelfPlacement.allCases) { placement in Text(placement.label).tag(placement) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
+                    }
+                    Toggle("Show PFW across Spaces", isOn: $state.showPFWAcrossSpaces)
+                    Toggle("Auto-hide after successful dry-run/apply", isOn: $state.autoHideAfterSuccess)
+                    Toggle("Auto dry-run after drop", isOn: $state.autoDryRunAfterDrop)
+                    Toggle("Enable hot-zone", isOn: $state.hotZoneEnabled)
+                    HStack(spacing: 12) {
+                        Stepper("Width \(Int(state.hotZoneWidth)) px", value: $state.hotZoneWidth, in: 6...80, step: 2)
+                        Stepper("Height \(Int(state.hotZoneHeight)) px", value: $state.hotZoneHeight, in: 80...360, step: 10)
+                    }
+                    Slider(value: $state.hotZoneIdleOpacity, in: 0.02...0.60) {
+                        Text("Hot-zone opacity")
+                    }
+                    helperText("Hot-zone은 activation mode가 Hot-Zone on Hover일 때만 활성화됩니다.")
+                }
+
+                settingsCard(title: "Global Shortcuts", icon: "keyboard") {
+                    settingRow("Command window") {
+                        Picker("Command window shortcut", selection: $state.commandShortcutPreset) {
+                            ForEach(CommandShortcutPreset.allCases) { preset in Text(preset.label).tag(preset) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 320)
+                    }
+                    helperText(state.commandShortcutPreset.detail)
+                    settingRow("Drop shelf") {
+                        Text(state.dropShelfShortcutPreset.label)
+                            .font(.system(.body, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    HStack {
-                        Button("Fetch from API Key") {
-                            state.verifyAndSaveZoteroAPIKey()
+                    helperText("단축키를 바꾸면 앱이 전역 hotkey를 즉시 재등록합니다.")
+                }
+
+                settingsCard(title: "Accounts & API Keys", icon: "key") {
+                    settingRow("Storage") {
+                        Picker("API key storage", selection: $state.apiKeyStorageMode) {
+                            ForEach(APIKeyStorageMode.allCases) { mode in Text(mode.label).tag(mode) }
                         }
-                        Button("Save unverified key") {
-                            state.saveUnverifiedZoteroAPIKey()
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 360)
+                    }
+
+                    subhead("Zotero")
+                    helperText("Zotero write API는 numeric user ID가 필요합니다. 이메일/username은 write URL에서 실패합니다.")
+                    pathRow("Numeric user ID", text: $state.zoteroUserID, actionTitle: "Fetch", action: state.verifyAndSaveZoteroAPIKey)
+                    if state.apiKeyStorageMode == .keychain {
+                        secureInputRow("API key", text: $state.pendingZoteroAPIKey, actionTitle: "Verify & Save", action: state.verifyAndSaveZoteroAPIKey)
+                        keyValue("Stored key", state.redactedAPIKey)
+                    } else {
+                        helperText("ZOTERO_API_KEY 환경변수를 사용합니다.")
+                    }
+                    accessGrid
+                    if !state.zoteroVerification.writeAccess {
+                        WarningBox(text: "Zotero write access가 없으면 apply-migration을 막습니다.")
+                    }
+
+                    Divider().opacity(0.35)
+
+                    subhead("Gemini")
+                    if state.apiKeyStorageMode == .keychain {
+                        secureInputRow("API key", text: $state.pendingGeminiAPIKey, actionTitle: "Verify & Save", action: state.verifyAndSaveGeminiAPIKey)
+                        keyValue("Stored key", state.redactedGeminiAPIKey)
+                    } else {
+                        helperText("GEMINI_API_KEY 환경변수를 사용합니다.")
+                    }
+                    settingRow("Model") {
+                        Picker("Gemini model", selection: $state.geminiModel) {
+                            Text("gemini-2.5-flash").tag("gemini-2.5-flash")
+                            Text("gemini-2.5-flash-lite").tag("gemini-2.5-flash-lite")
+                            Text("gemini-2.0-flash").tag("gemini-2.0-flash")
+                            Text("Custom").tag("custom")
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
+                    }
+                    if state.geminiModel == "custom" {
+                        settingRow("Custom model") {
+                            TextField("Custom Gemini model", text: $state.customGeminiModel)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 360)
                         }
                     }
-                } else {
-                    Text("PaperFlow will use ZOTERO_API_KEY from the process environment.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                StatusLine(label: "Numeric User ID", value: state.zoteroUserID.isEmpty ? "(not set)" : state.zoteroUserID)
-                StatusLine(label: "Username", value: state.zoteroUsername.isEmpty ? "(unknown)" : state.zoteroUsername)
-                StatusLine(label: "Library access", value: state.zoteroVerification.libraryAccess ? "yes" : "no")
-                StatusLine(label: "Write access", value: state.zoteroVerification.writeAccess ? "yes" : "no")
-                StatusLine(label: "Notes access", value: state.zoteroVerification.notesAccess ? "yes" : "no")
-                StatusLine(label: "Files access", value: state.zoteroVerification.filesAccess ? "yes" : "no")
-                StatusLine(label: "Verification", value: state.zoteroVerification.message)
-                if !state.zoteroVerification.writeAccess {
-                    Text("Apply migration is blocked until the Zotero key has user library write access.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                if !state.zoteroVerification.notesAccess {
-                    Text("Notes access is missing or unverified, so note/highlight preservation checks may be incomplete.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    Toggle("Enable Gemini cleanup", isOn: $state.geminiCleanupEnabled)
+                    Toggle("Stop batch cleanup when Gemini quota is hit", isOn: $state.stopOnGeminiQuotaHit)
+                    geminiUsageGrid
                 }
 
-                Divider()
-
-                Text("Gemini")
-                    .font(.headline)
-                if state.apiKeyStorageMode == .keychain {
-                    SecureField("Gemini API Key", text: $state.pendingGeminiAPIKey)
-                        .textFieldStyle(.roundedBorder)
-                    HStack {
-                        Text("Stored Gemini key")
-                        Spacer()
-                        Text(state.redactedGeminiAPIKey)
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                    HStack {
-                        Button("Verify Gemini Key") {
-                            state.verifyAndSaveGeminiAPIKey()
+                settingsCard(title: "Zotero Migration Defaults", icon: "books.vertical") {
+                    settingRow("Collection mode") {
+                        Picker("Collection mode", selection: $state.collectionMode) {
+                            ForEach(CollectionMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
                         }
-                        Button("Save unverified key") {
-                            state.saveUnverifiedGeminiAPIKey()
-                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
                     }
-                } else {
-                    Text("PaperFlow will use GEMINI_API_KEY from the process environment.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    settingRow("Tag mode") {
+                        Picker("Tag mode", selection: $state.tagMode) {
+                            ForEach(TagMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360)
+                    }
+                    helperText("Apply는 여전히 typed confirmation 없이는 실행되지 않습니다.")
                 }
-                Picker("Gemini model", selection: $state.geminiModel) {
-                    Text("gemini-2.5-flash").tag("gemini-2.5-flash")
-                    Text("gemini-2.5-flash-lite").tag("gemini-2.5-flash-lite")
-                    Text("gemini-2.0-flash").tag("gemini-2.0-flash")
-                    Text("Custom").tag("custom")
-                }
-                if state.geminiModel == "custom" {
-                    TextField("Custom Gemini model", text: $state.customGeminiModel)
-                        .textFieldStyle(.roundedBorder)
-                }
-                Toggle("Enable Gemini cleanup", isOn: $state.geminiCleanupEnabled)
-                Toggle("Stop batch cleanup when Gemini quota is hit", isOn: $state.stopOnGeminiQuotaHit)
-                StatusLine(label: "Gemini status", value: state.geminiVerification.message)
-                StatusLine(label: "Quota/rate status", value: state.geminiUsage.quotaStatus)
-                StatusLine(label: "Requests today", value: "\(state.geminiUsage.requestCount)")
-                StatusLine(label: "Input tokens", value: "\(state.geminiUsage.inputTokens)")
-                StatusLine(label: "Output tokens", value: "\(state.geminiUsage.outputTokens)")
-                StatusLine(label: "Total tokens", value: "\(state.geminiUsage.totalTokens)")
-                StatusLine(label: "Rate-limit calls", value: "\(state.geminiUsage.failedRateLimitCalls)")
-                if let lastSuccess = state.geminiUsage.lastSuccessTime {
-                    StatusLine(label: "Last success", value: lastSuccess)
-                }
-                if let last429 = state.geminiUsage.last429Time {
-                    StatusLine(label: "Last 429", value: last429)
-                }
-                if let lastInvalid = state.geminiUsage.lastInvalidKeyTime {
-                    StatusLine(label: "Last 401/403", value: lastInvalid)
-                }
-                if state.geminiVerification.rateLimited || state.geminiUsage.failedRateLimitCalls > 0 {
-                    Text("Gemini Flash is currently rate-limited. Try later or reduce batch size.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
 
-            Section("Cleanup") {
-                Toggle("Enable Gemini for abstract extraction", isOn: $state.enableGeminiAbstractExtraction)
-                Toggle("Enable Gemini for metadata extraction", isOn: $state.enableGeminiMetadataExtraction)
-                Toggle("Enable Gemini for classification review", isOn: $state.enableGeminiClassificationReview)
-                Toggle("Require manual approval for Gemini-generated repairs", isOn: $state.requireManualApprovalForGeminiRepairs)
-                Toggle("Never overwrite existing abstract", isOn: $state.neverOverwriteExistingAbstract)
-                Toggle("Never delete duplicate with reading work", isOn: $state.neverDeleteDuplicateWithReadingWork)
-            }
+                settingsCard(title: "Cleanup Safety", icon: "checklist") {
+                    Toggle("Enable Gemini for abstract extraction", isOn: $state.enableGeminiAbstractExtraction)
+                    Toggle("Enable Gemini for metadata extraction", isOn: $state.enableGeminiMetadataExtraction)
+                    Toggle("Enable Gemini for classification review", isOn: $state.enableGeminiClassificationReview)
+                    Toggle("Require manual approval for Gemini-generated repairs", isOn: $state.requireManualApprovalForGeminiRepairs)
+                    Toggle("Never overwrite existing abstract", isOn: $state.neverOverwriteExistingAbstract)
+                    Toggle("Never delete duplicate with reading work", isOn: $state.neverDeleteDuplicateWithReadingWork)
+                }
 
-            Section("Permissions") {
-                StatusLine(label: "Files and folders", value: permissions.filesAndFolders)
-                StatusLine(label: "Accessibility", value: permissions.accessibility)
-                StatusLine(label: "Input monitoring", value: permissions.inputMonitoring)
-                StatusLine(label: "Login item", value: permissions.loginItem)
-                Button("Open Accessibility Settings") {
-                    PermissionManager.openAccessibilitySettings()
+                settingsCard(title: "Permissions & macOS", icon: "lock") {
+                    keyValue("Files and folders", permissions.filesAndFolders)
+                    keyValue("Accessibility", permissions.accessibility)
+                    keyValue("Input monitoring", permissions.inputMonitoring)
+                    keyValue("Login item", permissions.loginItem)
+                    HStack {
+                        Button("Open Accessibility Settings") { PermissionManager.openAccessibilitySettings() }
+                        Toggle("Launch PaperFlow at login", isOn: Binding(
+                            get: { state.launchAtLogin },
+                            set: { state.setLaunchAtLogin($0) }
+                        ))
+                    }
                 }
             }
-
-            Section("macOS") {
-                Toggle("Launch PaperFlow at login", isOn: Binding(
-                    get: { state.launchAtLogin },
-                    set: { state.setLaunchAtLogin($0) }
-                ))
-            }
+            .frame(maxWidth: 980, alignment: .leading)
+            .padding(.bottom, 24)
         }
-        .formStyle(.grouped)
+    }
+
+    private var accessGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+            MiniSettingTile(title: "User ID", value: state.zoteroUserID.isEmpty ? "not set" : state.zoteroUserID)
+            MiniSettingTile(title: "Username", value: state.zoteroUsername.isEmpty ? "unknown" : state.zoteroUsername)
+            MiniSettingTile(title: "Library", value: state.zoteroVerification.libraryAccess ? "yes" : "no")
+            MiniSettingTile(title: "Write", value: state.zoteroVerification.writeAccess ? "yes" : "no")
+            MiniSettingTile(title: "Notes", value: state.zoteroVerification.notesAccess ? "yes" : "no")
+            MiniSettingTile(title: "Files", value: state.zoteroVerification.filesAccess ? "yes" : "no")
+        }
+    }
+
+    private var geminiUsageGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
+            MiniSettingTile(title: "Status", value: state.geminiVerification.message)
+            MiniSettingTile(title: "Quota", value: state.geminiUsage.quotaStatus)
+            MiniSettingTile(title: "Requests", value: "\(state.geminiUsage.requestCount)")
+            MiniSettingTile(title: "Tokens", value: "\(state.geminiUsage.totalTokens)")
+            MiniSettingTile(title: "429 calls", value: "\(state.geminiUsage.failedRateLimitCalls)")
+        }
+    }
+
+    private func settingsCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .foregroundStyle(Color(red: 0.40, green: 0.42, blue: 0.86))
+                    .frame(width: 22)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+            }
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.97, green: 0.98, blue: 1.0),
+                    Color(red: 1.0, green: 0.96, blue: 0.98),
+                    Color(red: 0.94, green: 0.99, blue: 0.96)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.045), radius: 12, x: 0, y: 6)
+    }
+
+    private func settingRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            Text(label)
+                .font(.callout)
+                .fontWeight(.medium)
+                .frame(width: 170, alignment: .leading)
+            content()
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func pathRow(_ label: String, text: Binding<String>, actionTitle: String, action: @escaping () -> Void) -> some View {
+        settingRow(label) {
+            TextField(label, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 260)
+            Button(actionTitle, action: action)
+        }
+    }
+
+    private func secureInputRow(_ label: String, text: Binding<String>, actionTitle: String, action: @escaping () -> Void) -> some View {
+        settingRow(label) {
+            SecureField(label, text: text)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 260)
+            Button(actionTitle, action: action)
+        }
+    }
+
+    private func keyValue(_ label: String, _ value: String) -> some View {
+        settingRow(label) {
+            Text(value.isEmpty ? "-" : value)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func subhead(_ value: String) -> some View {
+        Text(value)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .padding(.top, 4)
+    }
+
+    private func helperText(_ value: String) -> some View {
+        Text(value)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+
+private struct MiniSettingTile: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(2)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.42))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

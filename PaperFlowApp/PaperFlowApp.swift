@@ -49,6 +49,8 @@ final class AppServices {
                 defer: false
             )
             window.title = "PaperFlow"
+            window.minSize = NSSize(width: 980, height: 680)
+            window.setFrameAutosaveName("PaperFlow Main Window")
             window.center()
             window.contentView = NSHostingView(
                 rootView: MainWindowView()
@@ -57,13 +59,14 @@ final class AppServices {
             mainWindowController = NSWindowController(window: window)
         }
         mainWindowController?.showWindow(nil)
+        mainWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         Task { @MainActor in
             AppServices.shared.start()
             AppServices.shared.openMainWindow()

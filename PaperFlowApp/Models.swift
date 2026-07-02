@@ -8,6 +8,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case localFolderImport = "Local Folder Import"
     case existingAttachments = "Existing Attachments"
     case cleanupWorkbench = "Cleanup Workbench"
+    case userGuide = "User Guide"
     case reports = "Reports"
     case settings = "Settings"
     case logs = "Logs"
@@ -30,6 +31,8 @@ enum AppSection: String, CaseIterable, Identifiable {
             return "paperclip"
         case .cleanupWorkbench:
             return "checklist"
+        case .userGuide:
+            return "questionmark.circle"
         case .reports:
             return "doc.text.magnifyingglass"
         case .settings:
@@ -127,6 +130,71 @@ enum DropShelfPlacement: String, CaseIterable, Identifiable {
             return "Right Edge"
         case .custom:
             return "Custom"
+        }
+    }
+}
+
+enum DropShelfShortcutPreset: String, CaseIterable, Identifiable {
+    case controlShiftCommandPlus
+    case optionShiftD
+    case controlOptionD
+    case controlOptionSpace
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .controlShiftCommandPlus:
+            return "⌃⇧⌘+"
+        case .optionShiftD:
+            return "⌥⇧D"
+        case .controlOptionD:
+            return "⌃⌥D"
+        case .controlOptionSpace:
+            return "⌃⌥Space"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .controlShiftCommandPlus:
+            return "Control + Shift + Command + Plus"
+        case .optionShiftD:
+            return "Option + Shift + D"
+        case .controlOptionD:
+            return "Control + Option + D"
+        case .controlOptionSpace:
+            return "Control + Option + Space"
+        }
+    }
+}
+
+enum CommandShortcutPreset: String, CaseIterable, Identifiable {
+    case optionSpace
+    case controlSpace
+    case optionCommandSpace
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .optionSpace:
+            return "⌥Space"
+        case .controlSpace:
+            return "⌃Space"
+        case .optionCommandSpace:
+            return "⌥⌘Space"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .optionSpace:
+            return "Option + Space"
+        case .controlSpace:
+            return "Control + Space"
+        case .optionCommandSpace:
+            return "Option + Command + Space"
         }
     }
 }

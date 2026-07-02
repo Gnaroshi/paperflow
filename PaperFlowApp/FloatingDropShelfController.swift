@@ -137,6 +137,8 @@ final class FloatingDropShelfController: ObservableObject {
         state.shelfLastResult = "Shelf click received."
         if clickCount >= 2 {
             AppServices.shared.openMainWindow()
+        } else if isExpanded {
+            hideShelf()
         } else {
             showExpanded()
         }

@@ -4,34 +4,56 @@ struct DashboardView: View {
     @EnvironmentObject private var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SectionTitle("Dashboard")
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                InfoTile(title: "Project", value: state.projectPath)
-                InfoTile(title: "Zotero API", value: state.zoteroVerification.verified ? "Verified: \(state.zoteroUserID)" : state.zoteroConnectionStatus)
-                InfoTile(title: "Zotero Write Access", value: state.zoteroVerification.writeAccessLabel)
-                InfoTile(title: "Gemini", value: "\(state.geminiConnectionStatus) • \(state.selectedGeminiModel)")
-                InfoTile(title: "Gemini Usage", value: "\(state.geminiUsage.quotaStatus), \(state.geminiUsage.totalTokens) tokens today")
-                InfoTile(title: "Local Vault", value: state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs, \(state.vaultStatus.totalSizeLabel)" : "Not initialized")
-                InfoTile(title: "Source Items", value: "\(state.dashboard.sourceItems)")
-                InfoTile(title: "Planned Items", value: "\(state.dashboard.plannedItems)")
-                InfoTile(title: "Duplicate Candidates", value: "\(state.dashboard.duplicateCandidates)")
-                InfoTile(title: "Missing Metadata", value: "\(state.dashboard.missingMetadataItems)")
-                InfoTile(title: "Missing Abstracts", value: "\(state.dashboard.missingAbstractItems)")
-                InfoTile(title: "Low Confidence", value: "\(state.dashboard.lowConfidenceItems)")
-                InfoTile(title: "Non-paper", value: "\(state.dashboard.nonPaperItems)")
-                InfoTile(title: "Item Updates", value: "\(state.dashboard.itemUpdates)")
-                InfoTile(title: "Collections to Create", value: "\(state.dashboard.collectionsToCreate)")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionTitle("Dashboard")
+                Spacer()
+                Picker("Gemini model", selection: $state.geminiModel) {
+                    Text("2.5 Flash").tag("gemini-2.5-flash")
+                    Text("2.5 Flash Lite").tag("gemini-2.5-flash-lite")
+                    Text("2.0 Flash").tag("gemini-2.0-flash")
+                    Text("Custom").tag("custom")
+                }
+                .labelsHidden()
+                .frame(width: 210)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                StatusLine(label: "Latest migration", value: state.dashboard.latestMigrationStatus)
-                StatusLine(label: "Latest apply", value: state.dashboard.latestApplyStatus)
-                StatusLine(label: "Latest cleanup", value: state.dashboard.latestCleanupStatus)
-                StatusLine(label: "Migration audit", value: state.dashboard.latestMigrationAuditStatus)
-                StatusLine(label: "Stored PDF localization", value: state.dashboard.latestStoredPDFLocalizationStatus)
-                StatusLine(label: "Last ingest", value: state.vaultStatus.lastIngest)
+            HStack(alignment: .top, spacing: 12) {
+                heroStatusCard
+                VStack(spacing: 12) {
+                    compactStatus(title: "Zotero", value: state.zoteroVerification.verified ? "Verified" : "Unverified", detail: "Write: \(state.zoteroVerification.writeAccess ? "yes" : "no")", icon: "books.vertical")
+                    compactStatus(title: "Gemini", value: state.geminiVerification.verified ? "Verified" : state.geminiConnectionStatus, detail: state.selectedGeminiModel, icon: "sparkles")
+                }
+                .frame(width: 240)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 10)], spacing: 10) {
+                MetricTile(title: "Planned", value: "\(state.dashboard.plannedItems)", tint: .blue)
+                MetricTile(title: "Duplicates", value: "\(state.dashboard.duplicateCandidates)", tint: .purple)
+                MetricTile(title: "Missing metadata", value: "\(state.dashboard.missingMetadataItems)", tint: .orange)
+                MetricTile(title: "Missing abstracts", value: "\(state.dashboard.missingAbstractItems)", tint: .pink)
+                MetricTile(title: "Low confidence", value: "\(state.dashboard.lowConfidenceItems)", tint: .mint)
+                MetricTile(title: "Non-paper", value: "\(state.dashboard.nonPaperItems)", tint: .gray)
+                MetricTile(title: "Updates", value: "\(state.dashboard.itemUpdates)", tint: .indigo)
+                MetricTile(title: "Collections", value: "\(state.dashboard.collectionsToCreate)", tint: .teal)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
+                StatusCard(title: "Migration", rows: [
+                    ("Latest", state.dashboard.latestMigrationStatus),
+                    ("Apply", state.dashboard.latestApplyStatus),
+                    ("Audit", state.dashboard.latestMigrationAuditStatus)
+                ])
+                StatusCard(title: "Cleanup", rows: [
+                    ("Cleanup", state.dashboard.latestCleanupStatus),
+                    ("Stored PDFs", state.dashboard.latestStoredPDFLocalizationStatus),
+                    ("Last ingest", state.vaultStatus.lastIngest)
+                ])
+                StatusCard(title: "Gemini quota", rows: [
+                    ("Status", state.geminiUsage.quotaStatus),
+                    ("Requests", "\(state.geminiUsage.requestCount)"),
+                    ("Tokens", "\(state.geminiUsage.totalTokens)")
+                ])
             }
 
             if state.geminiUsage.failedRateLimitCalls > 0 {
@@ -41,6 +63,64 @@ struct DashboardView: View {
             SyncWarningBox()
         }
     }
+
+    private var heroStatusCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("PaperFlow Local Library", systemImage: "doc.text.magnifyingglass")
+                .font(.headline)
+            Text(state.projectPath)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(.secondary)
+            HStack {
+                Label(state.vaultStatus.exists ? "Vault ready" : "Vault missing", systemImage: state.vaultStatus.exists ? "externaldrive.fill" : "externaldrive.badge.xmark")
+                Spacer()
+                Text(state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)" : "Init Vault 필요")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            HStack {
+                Button("Open Vault") { state.openVault() }
+                Button("Open Reports") { state.openReportsFolder() }
+                Button("Refresh") { state.refreshStatus() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 168, alignment: .topLeading)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.92, green: 0.96, blue: 1.0),
+                    Color(red: 1.0, green: 0.94, blue: 0.98),
+                    Color(red: 0.92, green: 0.99, blue: 0.95)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+    }
+
+    private func compactStatus(title: String, value: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .background(Color.white.opacity(0.54))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
 }
 
 struct SyncWarningBox: View {
@@ -48,15 +128,64 @@ struct SyncWarningBox: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Zotero sync warning")
                 .font(.headline)
-            Text("Data sync and file sync are separate.")
-            Text("For a local-only PDF workflow, file sync should be off so PDFs do not consume Zotero Storage.")
-            Text("If Web API is used, Zotero Desktop may need data sync before changes are visible.")
-            Text("Turning off file sync prevents PDF attachments from consuming Zotero Storage.")
+            Text("Data sync과 file sync는 별개입니다. 로컬 PDF workflow에서는 file sync를 꺼야 Zotero Storage 300MB 제한을 피할 수 있습니다.")
+            Text("Web API로 migration을 apply했다면 Zotero Desktop에서 data sync가 필요할 수 있습니다.")
         }
         .font(.callout)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.yellow.opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color(red: 1.0, green: 0.95, blue: 0.78).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct MetricTile: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title2)
+                .fontWeight(.semibold)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .background(tint.opacity(0.13))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct StatusCard: View {
+    let title: String
+    let rows: [(String, String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            ForEach(rows, id: \.0) { row in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.0)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 78, alignment: .leading)
+                    Text(row.1)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+        .background(Color.white.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

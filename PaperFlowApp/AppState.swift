@@ -107,7 +107,23 @@ final class AppState: ObservableObject {
     @Published var neverUploadPDFsToZoteroStorage = true {
         didSet { defaults.set(neverUploadPDFsToZoteroStorage, forKey: "neverUploadPDFsToZoteroStorage") }
     }
-    @Published var globalShortcutCommand = "Option + Space"
+    @Published var commandShortcutPreset: CommandShortcutPreset = .optionSpace {
+        didSet {
+            defaults.set(commandShortcutPreset.rawValue, forKey: "commandShortcutPreset")
+            globalShortcutCommand = commandShortcutPreset.label
+            guard !suppressServiceCallbacks else { return }
+            AppServices.shared.hotkeyManager?.register(state: self)
+        }
+    }
+    @Published var dropShelfShortcutPreset: DropShelfShortcutPreset = .controlShiftCommandPlus {
+        didSet {
+            defaults.set(dropShelfShortcutPreset.rawValue, forKey: "dropShelfShortcutPreset")
+            dropShelfShortcut = dropShelfShortcutPreset.label
+            guard !suppressServiceCallbacks else { return }
+            AppServices.shared.hotkeyManager?.register(state: self)
+        }
+    }
+    @Published var globalShortcutCommand = "⌥Space"
     @Published var dropShelfShortcut = "⌃⇧⌘+"
     @Published var dropShelfPhase: DropShelfPhase = .idleCompact
     @Published var dropShelfAction: DropShelfAction = .dryRunIngest
@@ -242,6 +258,16 @@ final class AppState: ObservableObject {
         requireManualApprovalForGeminiRepairs = defaults.object(forKey: "requireManualApprovalForGeminiRepairs") as? Bool ?? true
         neverOverwriteExistingAbstract = defaults.object(forKey: "neverOverwriteExistingAbstract") as? Bool ?? true
         neverDeleteDuplicateWithReadingWork = defaults.object(forKey: "neverDeleteDuplicateWithReadingWork") as? Bool ?? true
+        if let value = defaults.string(forKey: "commandShortcutPreset"),
+           let preset = CommandShortcutPreset(rawValue: value) {
+            commandShortcutPreset = preset
+            globalShortcutCommand = preset.label
+        }
+        if let value = defaults.string(forKey: "dropShelfShortcutPreset"),
+           let preset = DropShelfShortcutPreset(rawValue: value) {
+            dropShelfShortcutPreset = preset
+            dropShelfShortcut = preset.label
+        }
 
         if let savedMode = defaults.string(forKey: "defaultMode"),
            let mode = DefaultRunMode(rawValue: savedMode) {

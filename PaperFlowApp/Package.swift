@@ -17,6 +17,7 @@ let package = Package(
             exclude: [
                 "README.md",
                 "Info.plist",
+                "PaperFlow.entitlements",
                 "build_app.sh",
                 "dist"
             ],
@@ -45,6 +46,7 @@ let package = Package(
                 "LocalFolderImportView.swift",
                 "ExistingAttachmentsView.swift",
                 "CleanupWorkbenchView.swift",
+                "UserGuideView.swift",
                 "ReportsView.swift",
                 "ReportParser.swift",
                 "PermissionManager.swift"

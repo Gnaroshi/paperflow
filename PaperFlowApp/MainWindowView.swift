@@ -7,31 +7,36 @@ struct MainWindowView: View {
     @State private var sidebarCollapsed = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarRailOrFullSidebar(
-                selectedSection: $state.selectedSection,
-                isCollapsed: $sidebarCollapsed
-            )
-            .frame(width: sidebarCollapsed ? 48 : 220)
-            .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
+        GeometryReader { geometry in
+            let sidebarWidth = sidebarCollapsed ? 56 : min(260, max(228, geometry.size.width * 0.22))
+            HStack(spacing: 0) {
+                SidebarRailOrFullSidebar(
+                    selectedSection: $state.selectedSection,
+                    isCollapsed: $sidebarCollapsed
+                )
+                .frame(width: sidebarWidth)
+                .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
 
-            Divider()
-
-            VStack(spacing: 0) {
-                HeaderView()
                 Divider()
-                ScrollView {
-                    sectionView
-                        .padding(20)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                VStack(spacing: 0) {
+                    HeaderView()
+                    Divider()
+                    ScrollView {
+                        sectionView
+                            .padding(.horizontal, geometry.size.width < 1180 ? 12 : 16)
+                            .padding(.vertical, 14)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    Divider()
+                    CommandLogView(runner: state.runner)
+                        .padding(10)
+                        .frame(minHeight: 128, idealHeight: 164, maxHeight: geometry.size.height < 820 ? 190 : 260)
                 }
-                Divider()
-                CommandLogView(runner: state.runner)
-                    .padding(14)
-                    .frame(minHeight: 180, idealHeight: 240, maxHeight: 320)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 1040, minHeight: 760)
+        .frame(minWidth: 980, minHeight: 700)
         .onAppear {
             state.refreshStatus()
         }
@@ -63,6 +68,8 @@ struct MainWindowView: View {
             ExistingAttachmentsView(confirm: showConfirmation)
         case .cleanupWorkbench:
             CleanupWorkbenchView(confirm: showConfirmation)
+        case .userGuide:
+            UserGuideView()
         case .reports:
             ReportsView()
         case .settings:
@@ -142,7 +149,7 @@ private struct SidebarRailOrFullSidebar: View {
                 isCollapsed.toggle()
             } label: {
                 Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.left")
-                    .frame(width: 32, height: 28)
+                    .frame(width: 36, height: 30)
             }
             .buttonStyle(.plain)
             .help(isCollapsed ? "Expand sidebar" : "Collapse sidebar")
@@ -150,7 +157,7 @@ private struct SidebarRailOrFullSidebar: View {
             .padding(.leading, 8)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     ForEach(AppSection.allCases) { section in
                         Button {
                             selectedSection = section
@@ -161,10 +168,11 @@ private struct SidebarRailOrFullSidebar: View {
                                 if !isCollapsed {
                                     Text(section.rawValue)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.82)
                                 }
                             }
-                            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                            .padding(.horizontal, isCollapsed ? 8 : 10)
+                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                            .padding(.horizontal, isCollapsed ? 8 : 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(selectedSection == section ? Color.accentColor.opacity(0.14) : Color.clear)
@@ -179,7 +187,16 @@ private struct SidebarRailOrFullSidebar: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.97, blue: 1.0),
+                    Color(red: 0.98, green: 0.95, blue: 0.98)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 }
 
@@ -197,7 +214,7 @@ struct HeaderView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button { AppServices.shared.shelfController?.showExpanded() } label: {
+            Button { AppServices.shared.shelfController?.toggleShelf() } label: {
                 Label("Shelf", systemImage: "tray.and.arrow.down")
             }
             Button { AppServices.shared.commandPopupWindow?.show() } label: {
@@ -353,8 +370,15 @@ struct SectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(.largeTitle)
-            .fontWeight(.semibold)
+            .font(.title)
+            .fontWeight(.bold)
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [Color(red: 0.22, green: 0.24, blue: 0.58), Color(red: 0.54, green: 0.34, blue: 0.72)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
     }
 }
 
@@ -374,8 +398,18 @@ struct InfoTile: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.97, blue: 1.0),
+                    Color(red: 1.0, green: 0.96, blue: 0.98)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.035), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -387,10 +421,12 @@ struct StatusLine: View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
                 .fontWeight(.medium)
-                .frame(width: 170, alignment: .leading)
+                .frame(width: 150, alignment: .leading)
             Text(value)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .lineLimit(2)
+                .truncationMode(.middle)
             Spacer()
         }
     }
@@ -419,7 +455,7 @@ struct WarningBox: View {
             .foregroundStyle(.secondary)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.yellow.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(Color(red: 1.0, green: 0.95, blue: 0.78).opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
