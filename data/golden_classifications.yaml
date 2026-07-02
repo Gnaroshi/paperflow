@@ -1,0 +1,201 @@
+- id: "2606.18208v1"
+  title: "Looped World Models"
+  arxiv_id: "2606.18208v1"
+  url: "https://arxiv.org/abs/2606.18208v1"
+  year: 2026
+  text: "arXiv:2606.18208v1. We introduce the first looped architectures for world modelling with parameter-shared transformers."
+  expected_collections:
+    - "AI Library/20 Areas/World Models & Simulation/Latent World Models"
+    - "AI Library/20 Areas/Recurrent & Adaptive Computation/Looped Transformers"
+  expected_tags:
+    - area/world-models
+    - area/recurrent-adaptive-computation
+    - method/world-model
+    - method/looped-transformer
+    - method/adaptive-computation
+    - source/arxiv
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "battery-degradation"
+  title: "Battery degradation and cycle life prediction"
+  year: 2025
+  text: "lithium-ion battery degradation cycle life state of health SOH remaining useful life RUL prediction"
+  expected_collections:
+    - "AI Library/20 Areas/Battery ML & Prognostics"
+  expected_tags:
+    - area/battery-ml
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "fixmatch"
+  title: "FixMatch: Simplifying Semi-Supervised Learning with Consistency and Confidence"
+  year: 2020
+  text: "FixMatch semi-supervised learning representation learning data augmentation. References document retrieval."
+  expected_collections:
+    - "AI Library/20 Areas/Representation Learning/Semi-Supervised Learning"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/representation-learning
+    - method/semi-supervised-learning
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "simclr"
+  title: "A Simple Framework for Contrastive Learning of Visual Representations"
+  year: 2020
+  text: "SimCLR contrastive learning self-supervised representation learning."
+  expected_collections:
+    - "AI Library/20 Areas/Representation Learning/Contrastive Learning"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/representation-learning
+    - method/contrastive-learning
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "neural-ode"
+  title: "Neural Ordinary Differential Equations"
+  year: 2018
+  text: "Neural ODE continuous-depth models dynamical systems controlled differential equations."
+  expected_collections:
+    - "AI Library/20 Areas/Time-Series & Dynamical Systems/Neural ODEs & CDEs"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/time-series
+    - method/neural-ode
+    - type/foundational
+  forbidden_collections:
+    - "AI Library/00 Inbox"
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "yolo"
+  title: "YOLO: You Only Look Once"
+  year: 2016
+  text: "YOLO you only look once object detection bounding boxes."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Object Detection"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/classic-cv
+    - task/object-detection
+    - type/foundational
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "faster-rcnn"
+  title: "Faster R-CNN"
+  year: 2015
+  text: "Faster R-CNN object detection region proposal networks."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Object Detection"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/classic-cv
+    - task/object-detection
+    - type/foundational
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "fpn"
+  title: "Feature Pyramid Networks for Object Detection"
+  year: 2017
+  text: "FPN feature pyramid networks object detection."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Object Detection"
+    - "AI Library/30 Resources/Foundational Papers"
+  expected_tags:
+    - area/classic-cv
+    - task/object-detection
+    - type/foundational
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "cotracker"
+  title: "CoTracker: It is Better to Track Together"
+  year: 2023
+  text: "CoTracker point tracking correspondence across video frames."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Tracking & Correspondence"
+  expected_tags:
+    - area/classic-cv
+    - task/tracking
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "raft-3d"
+  title: "RAFT-3D: Scene Flow using Rigid-Motion Embeddings"
+  year: 2020
+  text: "RAFT-3D scene flow 3D vision 3D motion reconstruction."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Scene Flow & 3D Vision"
+  expected_tags:
+    - area/classic-cv
+    - task/scene-flow
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "libero"
+  title: "LIBERO: Benchmarking Knowledge Transfer for Lifelong Robot Learning"
+  year: 2023
+  text: "LIBERO robot benchmarks robot manipulation imitation learning policy learning."
+  expected_collections:
+    - "AI Library/20 Areas/Vision-Language-Action & Robotics/Robot Benchmarks"
+  expected_tags:
+    - area/vla-robotics
+    - type/benchmark
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - method/rag
+
+- id: "conditional-prompt-learning"
+  title: "Conditional Prompt Learning for Vision-Language Models"
+  year: 2022
+  text: "Conditional prompt learning for vision-language models with prompt adapters."
+  expected_collections:
+    - "AI Library/20 Areas/Vision-Language Models/Prompt Learning & Adapters"
+  expected_tags:
+    - area/vlm
+    - method/prompt-learning
+    - method/adapter
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - source/arxiv
+    - method/rag
+
+- id: "ieee-doi-no-fake-arxiv"
+  title: "A CVPR Object Detection Paper"
+  doi: "10.1109/CVPR52688.2022.01631"
+  year: 2022
+  text: "Object detection with convolutional neural networks."
+  expected_collections:
+    - "AI Library/20 Areas/Computer Vision/Object Detection"
+  expected_tags:
+    - source/conference
+  forbidden_collections:
+    - "AI Library/20 Areas/LLMs & Reasoning/RAG & Retrieval"
+  forbidden_tags:
+    - source/arxiv
+    - method/rag

@@ -16,6 +16,9 @@ DEFAULT_OVERRIDES_PATH = Path("config/user_taxonomy_overrides.yaml")
 DEFAULT_GOLDEN_SET_PATH = Path("data/taxonomy_golden_set.json")
 DEFAULT_EVALUATION_JSON_PATH = Path("data/taxonomy_evaluation.json")
 DEFAULT_EVALUATION_REPORT_PATH = Path("data/taxonomy_evaluation.md")
+DEFAULT_GOLDEN_CLASSIFICATIONS_PATH = Path("data/golden_classifications.yaml")
+DEFAULT_GOLDEN_EVALUATION_JSON_PATH = Path("data/golden_evaluation.json")
+DEFAULT_GOLDEN_EVALUATION_REPORT_PATH = Path("data/golden_evaluation.md")
 
 CONDITION_KEYS = {
     "title_contains",
@@ -430,3 +433,247 @@ def write_taxonomy_evaluation_report(evaluation: dict[str, Any], path: Path = DE
 
 def write_golden_set(path: Path, data: dict[str, Any]) -> None:
     dump_json_data(path, data)
+
+
+def load_golden_classifications(path: Path = DEFAULT_GOLDEN_CLASSIFICATIONS_PATH) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    if not isinstance(data, list):
+        raise ValueError(f"{path} must contain a YAML list of golden classification entries.")
+    entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(data):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path}[{index}] must be a mapping.")
+        entries.append(entry)
+    return entries
+
+
+def write_golden_classifications(path: Path, entries: list[dict[str, Any]]) -> None:
+    ensure_parent_dir(path)
+    path.write_text(yaml.safe_dump(entries, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def golden_id_from_row(row: dict[str, Any], fallback: str) -> str:
+    detected = row.get("detected") or {}
+    for key in ("arxiv_id", "doi"):
+        value = detected.get(key)
+        if value:
+            return str(value)
+    path = row.get("path")
+    if path:
+        return Path(str(path)).stem
+    return fallback
+
+
+def golden_entry_from_classification(
+    target: str,
+    row: dict[str, Any],
+    classification: dict[str, Any],
+    target_type: str,
+) -> dict[str, Any]:
+    detected = row.get("detected") or {}
+    entry = {
+        "id": golden_id_from_row(row, target),
+        "title": detected.get("title") or row.get("pdf_metadata_title") or Path(str(row.get("filename") or target)).stem,
+        "expected_collections": classification.get("target_collections", []),
+        "expected_tags": classification.get("normalized_tags", []),
+        "forbidden_collections": [],
+        "forbidden_tags": [],
+        "expected_confidence_min": classification.get("confidence"),
+    }
+    if target_type == "pdf" and row.get("path"):
+        entry["source_path"] = row["path"]
+    elif target_type == "zotero_item":
+        entry["item_key"] = target
+    if detected.get("doi"):
+        entry["doi"] = detected["doi"]
+    if detected.get("arxiv_id"):
+        entry["arxiv_id"] = detected["arxiv_id"]
+    if detected.get("year"):
+        entry["year"] = detected["year"]
+    return entry
+
+
+def upsert_golden_classification(path: Path, entry: dict[str, Any]) -> dict[str, Any]:
+    entries = load_golden_classifications(path)
+    replaced = False
+    output: list[dict[str, Any]] = []
+    for existing in entries:
+        if str(existing.get("id")) == str(entry.get("id")):
+            output.append(entry)
+            replaced = True
+        else:
+            output.append(existing)
+    if not replaced:
+        output.append(entry)
+    write_golden_classifications(path, output)
+    return {"path": str(path), "id": entry.get("id"), "count": len(output), "updated": replaced}
+
+
+def golden_entry_to_scan_row(entry: dict[str, Any]) -> dict[str, Any]:
+    title = str(entry.get("title") or entry.get("id") or "")
+    abstract = str(entry.get("abstract") or entry.get("text") or "")
+    text = "\n".join(
+        value
+        for value in [
+            title,
+            abstract,
+            str(entry.get("venue") or ""),
+            str(entry.get("url") or ""),
+            str(entry.get("doi") or ""),
+        ]
+        if value
+    )
+    return {
+        "path": entry.get("source_path") or "",
+        "filename": f"{entry.get('id') or 'golden'}.pdf",
+        "publicationTitle": entry.get("venue") or entry.get("publicationTitle") or "",
+        "abstract": abstract,
+        "first_page_abstract_candidate": abstract,
+        "first_pages_text": text,
+        "detected": {
+            "title": title,
+            "doi": entry.get("doi"),
+            "arxiv_id": entry.get("arxiv_id"),
+            "year": entry.get("year"),
+            "url": entry.get("url"),
+            "abstract_present": bool(abstract.strip()) or bool(entry.get("abstract_present", True)),
+            "publicationTitle": entry.get("venue") or entry.get("publicationTitle") or "",
+        },
+    }
+
+
+def _entry_list(entry: dict[str, Any], key: str) -> list[str]:
+    return _string_list(entry.get(key))
+
+
+def evaluate_golden_classifications(
+    entries: list[dict[str, Any]],
+    classifier: Any,
+    row_builder: Any | None = None,
+) -> dict[str, Any]:
+    row_builder = row_builder or golden_entry_to_scan_row
+    results: list[dict[str, Any]] = []
+    exact_collection_matches = 0
+    partial_collection_matches = 0
+    high_confidence_regressions = 0
+    low_confidence_matches = 0
+
+    for entry in entries:
+        row = row_builder(entry)
+        classification = classifier(row)
+        actual_collections = classification.get("target_collections") or []
+        actual_tags = classification.get("normalized_tags") or []
+        expected_collections = _entry_list(entry, "expected_collections")
+        expected_tags = _entry_list(entry, "expected_tags")
+        forbidden_collections = _entry_list(entry, "forbidden_collections")
+        forbidden_tags = _entry_list(entry, "forbidden_tags")
+
+        actual_collection_set = set(actual_collections)
+        actual_tag_set = set(actual_tags)
+        expected_collection_set = set(expected_collections)
+        expected_tag_set = set(expected_tags)
+
+        exact_collection_match = actual_collection_set == expected_collection_set if expected_collections else False
+        partial_collection_match = expected_collection_set.issubset(actual_collection_set) if expected_collections else True
+        missing_expected_collections = sorted(expected_collection_set - actual_collection_set)
+        unexpected_collections = sorted(actual_collection_set - expected_collection_set)
+        missing_expected_tags = sorted(expected_tag_set - actual_tag_set)
+        forbidden_collections_present = sorted(set(forbidden_collections) & actual_collection_set)
+        forbidden_tags_present = sorted(set(forbidden_tags) & actual_tag_set)
+        confidence = float(classification.get("confidence") or 0.0)
+        expected_min = entry.get("expected_confidence_min")
+        expected_min = float(expected_min) if expected_min is not None else 0.75
+        confidence_calibration = "ok"
+        regression = bool(
+            missing_expected_collections
+            or missing_expected_tags
+            or forbidden_collections_present
+            or forbidden_tags_present
+        )
+        if regression and confidence >= 0.75:
+            confidence_calibration = "high_confidence_regression"
+            high_confidence_regressions += 1
+        elif not regression and confidence < expected_min:
+            confidence_calibration = "low_confidence_match"
+            low_confidence_matches += 1
+
+        exact_collection_matches += int(exact_collection_match)
+        partial_collection_matches += int(partial_collection_match)
+        results.append(
+            {
+                "id": entry.get("id"),
+                "title": entry.get("title"),
+                "ok": not regression,
+                "exact_collection_match": exact_collection_match,
+                "partial_collection_match": partial_collection_match,
+                "expected_collections": expected_collections,
+                "actual_collections": actual_collections,
+                "missing_expected_collections": missing_expected_collections,
+                "unexpected_collections": unexpected_collections,
+                "expected_tags": expected_tags,
+                "actual_tags": actual_tags,
+                "missing_expected_tags": missing_expected_tags,
+                "forbidden_collections_present": forbidden_collections_present,
+                "forbidden_tags_present": forbidden_tags_present,
+                "confidence": confidence,
+                "expected_confidence_min": expected_min,
+                "confidence_calibration": confidence_calibration,
+                "rationale": classification.get("rationale"),
+            }
+        )
+
+    regression_count = sum(1 for result in results if not result["ok"])
+    total = len(results)
+    return {
+        "schema_version": "1.0",
+        "golden_set": str(DEFAULT_GOLDEN_CLASSIFICATIONS_PATH),
+        "total": total,
+        "exact_collection_matches": exact_collection_matches,
+        "partial_collection_matches": partial_collection_matches,
+        "regression_count": regression_count,
+        "high_confidence_regressions": high_confidence_regressions,
+        "low_confidence_matches": low_confidence_matches,
+        "pass_rate": round((total - regression_count) / total, 4) if total else 1.0,
+        "results": results,
+    }
+
+
+def write_golden_evaluation_report(
+    evaluation: dict[str, Any],
+    path: Path = DEFAULT_GOLDEN_EVALUATION_REPORT_PATH,
+) -> None:
+    ensure_parent_dir(path)
+    lines = [
+        "# golden classification evaluation",
+        "",
+        f"- Total: {evaluation.get('total', 0)}",
+        f"- Exact collection matches: {evaluation.get('exact_collection_matches', 0)}",
+        f"- Partial collection matches: {evaluation.get('partial_collection_matches', 0)}",
+        f"- Regression count: {evaluation.get('regression_count', 0)}",
+        f"- High-confidence regressions: {evaluation.get('high_confidence_regressions', 0)}",
+        f"- Low-confidence matches: {evaluation.get('low_confidence_matches', 0)}",
+        f"- Pass rate: {evaluation.get('pass_rate', 1.0):.2%}",
+        "",
+        "## results",
+        "",
+    ]
+    for result in evaluation.get("results", []):
+        status = "PASS" if result.get("ok") else "REGRESSION"
+        lines.extend(
+            [
+                f"### {status}: {result.get('title') or result.get('id')}",
+                "",
+                f"- Exact collection match: {result.get('exact_collection_match')}",
+                f"- Partial collection match: {result.get('partial_collection_match')}",
+                f"- Missing expected tags: {', '.join(result.get('missing_expected_tags') or []) or 'none'}",
+                f"- Forbidden tags present: {', '.join(result.get('forbidden_tags_present') or []) or 'none'}",
+                f"- Forbidden collections present: {', '.join(result.get('forbidden_collections_present') or []) or 'none'}",
+                f"- Confidence: {result.get('confidence', 0):.2f}",
+                f"- Confidence calibration: {result.get('confidence_calibration')}",
+                f"- Regression: {not result.get('ok')}",
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")

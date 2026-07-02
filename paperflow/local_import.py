@@ -1180,12 +1180,14 @@ def _resource_candidates(candidates: list[dict[str, Any]], evidence: dict[str, A
         "deep residual learning",
         "batch normalization",
         "you only look once",
+        "yolo",
         "faster r-cnn",
         "feature pyramid networks",
         "u-net",
         "an image is worth 16x16 words",
         "learning transferable visual models",
         "neural ordinary differential equations",
+        "neural ode",
         "semi-supervised classification with graph convolutional networks",
         "a simple framework for contrastive learning",
         "momentum contrast",
@@ -1492,6 +1494,15 @@ def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> 
         text,
         _contains_any(text, ("imitation learning",)),
     )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Vision-Language-Action & Robotics/Robot Benchmarks",
+        0.86,
+        ["area/vla-robotics", "task/robot-manipulation", "type/benchmark"],
+        "robot benchmark signal",
+        text,
+        _contains_any(text, ("libero", "robot benchmark", "robot benchmarks", "manipulation benchmark")),
+    )
 
     vlm_matches = _contains_any(
         text,
@@ -1500,7 +1511,9 @@ def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> 
             "vision-language model",
             "vision language model",
             "vlm",
+            "conditional prompt learning",
             "multimodal prompt learning",
+            "prompt learning",
             "visual question answering",
             "image-text",
             "text-aware visual",
@@ -1565,6 +1578,24 @@ def classify_scan_row(row: dict[str, Any], forced_review: str | None = None) -> 
         "object detection signal",
         text,
         _contains_any(text, ("yolo", "faster r-cnn", "detr", "object detection", "bounding box", "fpn")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Tracking & Correspondence",
+        0.82,
+        ["area/classic-cv", "task/tracking"],
+        "tracking/correspondence signal",
+        text,
+        _contains_any(text, ("cotracker", "co-tracker", "tracking", "point tracking", "correspondence", "optical flow")),
+    )
+    _add_candidate(
+        candidates,
+        "AI Library/20 Areas/Computer Vision/Scene Flow & 3D Vision",
+        0.82,
+        ["area/classic-cv", "task/scene-flow", "task/3d-reconstruction"],
+        "scene flow / 3D vision signal",
+        text,
+        _contains_any(text, ("raft-3d", "raft3d", "scene flow", "3d vision", "3d motion", "3d reconstruction")),
     )
     _add_candidate(
         candidates,

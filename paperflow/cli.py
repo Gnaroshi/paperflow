@@ -121,13 +121,22 @@ from paperflow.rollback import (
 from paperflow.taxonomy_overrides import (
     DEFAULT_EVALUATION_JSON_PATH,
     DEFAULT_EVALUATION_REPORT_PATH,
+    DEFAULT_GOLDEN_CLASSIFICATIONS_PATH,
+    DEFAULT_GOLDEN_EVALUATION_JSON_PATH,
+    DEFAULT_GOLDEN_EVALUATION_REPORT_PATH,
     DEFAULT_GOLDEN_SET_PATH,
     build_golden_set_from_files,
     evaluate_golden_set,
+    evaluate_golden_classifications,
     find_zotero_item_for_explain,
+    golden_entry_from_classification,
+    golden_entry_to_scan_row,
     item_key_to_scan_row,
+    load_golden_classifications,
+    upsert_golden_classification,
     validate_user_taxonomy_overrides,
     write_golden_set,
+    write_golden_evaluation_report,
     write_taxonomy_evaluation_report,
 )
 from paperflow.utils import dump_json_data, read_json_model, write_jsonl
@@ -741,37 +750,55 @@ def _read_json_optional(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _taxonomy_row_for_target(pdf_or_item_key: str) -> tuple[dict, str, list[str]]:
+    target_path = Path(pdf_or_item_key).expanduser()
+    errors: list[str] = []
+    if target_path.exists():
+        if not target_path.is_file() or target_path.suffix.lower() != ".pdf":
+            console.print(f"[bold red]Expected a PDF file path: {target_path}[/bold red]")
+            raise typer.Exit(2)
+        metadata, errors = scan_pdf_metadata(target_path)
+        return (
+            {
+                "path": str(target_path.resolve()),
+                "filename": target_path.name,
+                "size_bytes": target_path.stat().st_size,
+                **metadata,
+            },
+            "pdf",
+            errors,
+        )
+
+    item = find_zotero_item_for_explain(pdf_or_item_key)
+    if not item:
+        console.print(
+            "[bold red]Could not find PDF path or cached Zotero item key. "
+            "Run `paperflow zotero enrich-metadata` or pass a PDF path.[/bold red]"
+        )
+        raise typer.Exit(2)
+    return item_key_to_scan_row(item), "zotero_item", errors
+
+
+def _taxonomy_row_for_golden_entry(entry: dict) -> dict:
+    source_path = entry.get("source_path")
+    if source_path and Path(str(source_path)).expanduser().exists():
+        row, _, _ = _taxonomy_row_for_target(str(source_path))
+        return row
+    item_key = entry.get("item_key")
+    if item_key:
+        item = find_zotero_item_for_explain(str(item_key))
+        if item:
+            return item_key_to_scan_row(item)
+    return golden_entry_to_scan_row(entry)
+
+
 @taxonomy_app.command("explain")
 def taxonomy_explain_command(
     pdf_or_item_key: str = typer.Argument(..., help="PDF path or Zotero item key to classify/explain."),
 ) -> None:
     """Explain taxonomy v3 classification for a local PDF or cached Zotero item key."""
 
-    target_path = Path(pdf_or_item_key).expanduser()
-    errors: list[str] = []
-    target_type = "zotero_item"
-    if target_path.exists():
-        if not target_path.is_file() or target_path.suffix.lower() != ".pdf":
-            console.print(f"[bold red]Expected a PDF file path: {target_path}[/bold red]")
-            raise typer.Exit(2)
-        metadata, errors = scan_pdf_metadata(target_path)
-        row = {
-            "path": str(target_path.resolve()),
-            "filename": target_path.name,
-            "size_bytes": target_path.stat().st_size,
-            **metadata,
-        }
-        target_type = "pdf"
-    else:
-        item = find_zotero_item_for_explain(pdf_or_item_key)
-        if not item:
-            console.print(
-                "[bold red]Could not find PDF path or cached Zotero item key. "
-                "Run `paperflow zotero enrich-metadata` or pass a PDF path.[/bold red]"
-            )
-            raise typer.Exit(2)
-        row = item_key_to_scan_row(item)
-
+    row, target_type, errors = _taxonomy_row_for_target(pdf_or_item_key)
     classification = classify_scan_row(row)
     evidence = classification_evidence(row)
     console.print_json(
@@ -788,6 +815,73 @@ def taxonomy_explain_command(
             "errors": errors,
         }
     )
+
+
+@taxonomy_app.command("add-golden")
+def taxonomy_add_golden_command(
+    item_key_or_pdf_path: str = typer.Argument(..., help="PDF path or cached Zotero item key to add/update."),
+    output_path: Path = typer.Option(
+        DEFAULT_GOLDEN_CLASSIFICATIONS_PATH,
+        "--output",
+        "-o",
+        help="Golden classification YAML file.",
+    ),
+) -> None:
+    """Add or update a classifier golden-set entry from the current classification."""
+
+    row, target_type, errors = _taxonomy_row_for_target(item_key_or_pdf_path)
+    classification = classify_scan_row(row)
+    entry = golden_entry_from_classification(
+        item_key_or_pdf_path,
+        row,
+        classification,
+        target_type,
+    )
+    result = upsert_golden_classification(output_path, entry)
+    console.print_json(data={**result, "entry": entry, "errors": errors})
+
+
+@taxonomy_app.command("evaluate")
+def taxonomy_evaluate_command(
+    golden_path: Path = typer.Option(
+        DEFAULT_GOLDEN_CLASSIFICATIONS_PATH,
+        "--golden",
+        help="Golden classification YAML input.",
+    ),
+    output_path: Path = typer.Option(
+        DEFAULT_GOLDEN_EVALUATION_JSON_PATH,
+        "--output",
+        "-o",
+        help="Golden evaluation JSON output.",
+    ),
+    report_path: Path = typer.Option(
+        DEFAULT_GOLDEN_EVALUATION_REPORT_PATH,
+        "--report",
+        help="Golden evaluation markdown report.",
+    ),
+) -> None:
+    """Evaluate classifier regressions against data/golden_classifications.yaml."""
+
+    try:
+        entries = load_golden_classifications(golden_path)
+    except Exception as exc:
+        console.print(f"[bold red]Could not read golden classifications: {exc}[/bold red]")
+        raise typer.Exit(2)
+    evaluation = evaluate_golden_classifications(
+        entries,
+        classify_scan_row,
+        row_builder=_taxonomy_row_for_golden_entry,
+    )
+    evaluation["golden_set"] = str(golden_path)
+    dump_json_data(output_path, evaluation)
+    write_golden_evaluation_report(evaluation, report_path)
+    console.print(
+        f"Evaluated {evaluation['total']} golden classifications: "
+        f"{evaluation['regression_count']} regressions. "
+        f"Report: {report_path}"
+    )
+    if evaluation["regression_count"]:
+        raise typer.Exit(1)
 
 
 @taxonomy_app.command("test")
