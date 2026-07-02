@@ -127,11 +127,12 @@ final class GlobalHotkeyManager {
         }
         switch hotkey {
         case .commandWindow:
-            AppServices.shared.commandPopupWindow?.toggle()
+            AppServices.shared.showCommandWindow()
         case .dropShelfPrimary, .dropShelfSecondary:
-            AppServices.shared.shelfController?.toggleShelf()
+            AppServices.shared.toggleShelf()
         case .finderSelectionIngest:
             state?.invalidDropWarnings = ["Finder selection ingest is planned but not implemented yet."]
+            AppServices.shared.start()
             AppServices.shared.shelfController?.showExpanded()
         }
     }

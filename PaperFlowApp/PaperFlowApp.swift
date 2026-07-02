@@ -18,19 +18,33 @@ final class AppServices {
     private init() {}
 
     func start() {
-        guard menuBarController == nil else {
-            return
+        if menuBarController == nil {
+            menuBarController = MenuBarController(state: state)
         }
-        menuBarController = MenuBarController(state: state)
-        let shelf = FloatingDropShelfController(state: state, monitorManager: monitorManager)
-        shelfController = shelf
-        commandPopupWindow = CommandPopupWindow(state: state, monitorManager: monitorManager)
+        if shelfController == nil {
+            let shelf = FloatingDropShelfController(state: state, monitorManager: monitorManager)
+            shelfController = shelf
+            shelf.applyActivationMode()
+        }
+        if commandPopupWindow == nil {
+            commandPopupWindow = CommandPopupWindow(state: state, monitorManager: monitorManager)
+        }
 
-        let hotkeys = GlobalHotkeyManager()
-        hotkeys.register(state: state)
-        hotkeyManager = hotkeys
+        if hotkeyManager == nil {
+            let hotkeys = GlobalHotkeyManager()
+            hotkeys.register(state: state)
+            hotkeyManager = hotkeys
+        }
+    }
 
-        shelf.applyActivationMode()
+    func toggleShelf() {
+        start()
+        shelfController?.toggleShelf()
+    }
+
+    func showCommandWindow() {
+        start()
+        commandPopupWindow?.show()
     }
 
     func reconfigureHotZones() {
@@ -40,6 +54,13 @@ final class AppServices {
     func openMainWindow(section: AppSection? = nil) {
         if let section {
             state.selectedSection = section
+        }
+        if let existingWindow = NSApp.windows.first(where: { window in
+            window.title == "PaperFlow" && !(window is DropShelfPanel) && !(window is CommandPopupPanel)
+        }) {
+            existingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
         if mainWindowController == nil {
             let window = NSWindow(
@@ -69,7 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         Task { @MainActor in
             AppServices.shared.start()
-            AppServices.shared.openMainWindow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            Task { @MainActor in
+                AppServices.shared.openMainWindow()
+            }
         }
     }
 
@@ -86,6 +111,18 @@ struct PaperFlowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
+        WindowGroup("PaperFlow") {
+            MainWindowView()
+                .environmentObject(AppServices.shared.state)
+                .frame(minWidth: 980, minHeight: 700)
+                .onAppear {
+                    Task { @MainActor in
+                        AppServices.shared.start()
+                    }
+                }
+        }
+        .defaultSize(width: 1120, height: 820)
+
         Settings {
             SettingsView()
                 .environmentObject(AppServices.shared.state)

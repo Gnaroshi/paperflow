@@ -75,7 +75,7 @@ struct CommandPaletteView: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 TextField("Search PaperFlow actions", text: $query)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
@@ -103,7 +103,7 @@ struct CommandPaletteView: View {
                                         .fontWeight(action.id == selectedID ? .semibold : .regular)
                                     Text(action.subtitle)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(PaperFlowTheme.muted)
                                 }
                                 Spacer()
                                 if action.destructive {
@@ -112,7 +112,7 @@ struct CommandPaletteView: View {
                                 }
                             }
                             .padding(10)
-                            .background(action.id == selectedID ? Color.accentColor.opacity(0.14) : Color.clear)
+                            .background(action.id == selectedID ? PaperFlowTheme.sky.opacity(0.18) : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
@@ -131,9 +131,9 @@ struct CommandPaletteView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Apply Migration requires confirmation")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PaperFlowTheme.muted)
                     TextField("REPLACE MY ZOTERO COLLECTIONS", text: $confirmation)
-                        .textFieldStyle(.roundedBorder)
+                        .paperFlowTextInput()
                 }
                 .padding(12)
             }
@@ -142,7 +142,7 @@ struct CommandPaletteView: View {
             HStack {
                 Text("Enter runs selected dry-run action. Escape closes.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 Spacer()
                 Button("Close", action: onClose)
             }
@@ -151,7 +151,9 @@ struct CommandPaletteView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(commandBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color(red: 0.24, green: 0.18, blue: 0.42).opacity(0.18), radius: 26, x: 0, y: 18)
+        .shadow(color: PaperFlowTheme.lilac.opacity(0.18), radius: 28, x: 0, y: 18)
+        .foregroundStyle(PaperFlowTheme.ink)
+        .preferredColorScheme(.dark)
         .onAppear {
             searchFocused = true
             selectedID = filteredActions.first?.id ?? selectedID
@@ -176,7 +178,7 @@ struct CommandPaletteView: View {
 
     private var softSeparator: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.34))
+            .fill(PaperFlowTheme.line)
             .frame(height: 1)
     }
 
@@ -184,16 +186,19 @@ struct CommandPaletteView: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.95, green: 0.96, blue: 1.0),
-                    Color(red: 1.0, green: 0.94, blue: 0.97),
-                    Color(red: 0.92, green: 0.98, blue: 0.96)
+                    PaperFlowTheme.canvas0,
+                    PaperFlowTheme.panel0,
+                    PaperFlowTheme.panel2
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            Rectangle()
-                .fill(.regularMaterial)
-                .opacity(0.78)
+            RadialGradient(
+                colors: [PaperFlowTheme.lilac.opacity(0.20), .clear],
+                center: .topTrailing,
+                startRadius: 12,
+                endRadius: 420
+            )
         }
     }
 }

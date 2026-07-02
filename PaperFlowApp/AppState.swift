@@ -353,7 +353,6 @@ final class AppState: ObservableObject {
         }
 
         restoreZoteroVerification()
-        refreshStatus()
         suppressServiceCallbacks = false
     }
 

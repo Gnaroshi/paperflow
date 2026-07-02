@@ -238,7 +238,9 @@ final class FloatingDropShelfController: ObservableObject {
                 rootView: DropShelfView(controller: self)
                     .environmentObject(state)
             )
+            panel.alphaValue = 1
             panel.orderFrontRegardless()
+            panel.makeKeyAndOrderFront(nil)
             auxiliaryPanels.append(panel)
         }
         visibilityState = .visible
@@ -294,7 +296,9 @@ final class FloatingDropShelfController: ObservableObject {
                 : frame
             panel.setFrame(startFrame, display: false)
         }
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
         if expanded {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22

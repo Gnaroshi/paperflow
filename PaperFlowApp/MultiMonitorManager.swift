@@ -12,14 +12,14 @@ final class MultiMonitorManager {
         case .cursorMonitor:
             return [cursorScreen()]
         case .focusedMonitor:
-            return [focusedScreen(strategy: state.focusedMonitorStrategy)]
+            return [appFocusedScreen() ?? focusedScreen(strategy: state.focusedMonitorStrategy)]
         }
     }
 
     func focusedScreen(strategy: FocusedMonitorStrategy) -> NSScreen {
         switch strategy {
         case .keyboardMainScreen:
-            return NSScreen.main ?? cursorScreen()
+            return appFocusedScreen() ?? NSScreen.main ?? cursorScreen()
         case .cursorScreen:
             return cursorScreen()
         case .frontmostAppWindowScreen:
@@ -40,6 +40,16 @@ final class MultiMonitorManager {
             ?? {
                 fatalError("PaperFlow could not find any NSScreen instances.")
             }()
+    }
+
+    private func appFocusedScreen() -> NSScreen? {
+        if let keyScreen = NSApp.keyWindow?.screen {
+            return keyScreen
+        }
+        if let mainScreen = NSApp.mainWindow?.screen {
+            return mainScreen
+        }
+        return nil
     }
 
     func screenDescription() -> String {

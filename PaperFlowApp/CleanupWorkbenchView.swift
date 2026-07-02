@@ -87,7 +87,7 @@ struct CleanupWorkbenchView: View {
                 .font(.headline)
             HStack {
                 TextField("Search title, DOI, arXiv ID, or item key", text: $explainQuery)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
                 Button("Explain via CLI") {
                     if let first = explainedItems.first {
                         state.runExplainItem(first.itemKey)
@@ -105,13 +105,13 @@ struct CleanupWorkbenchView: View {
                         Spacer()
                         Text(item.itemKey)
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                     }
                     WorkbenchFlowRow(label: "Before", values: item.currentCollections)
                     WorkbenchFlowRow(label: "After", values: item.plannedCollections)
                     WorkbenchFlowRow(label: "Tags", values: item.normalizedTags)
                     Text("Why: \(item.rationale)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PaperFlowTheme.muted)
                     HStack {
                         Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                         Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
@@ -122,8 +122,7 @@ struct CleanupWorkbenchView: View {
                     }
                 }
                 .padding(10)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .paperFlowCard(tint: PaperFlowTheme.sky, radius: 12)
             }
         }
     }
@@ -208,13 +207,13 @@ private struct MissingAbstractPane: View {
                                     .font(.headline)
                                 Text("Before")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(PaperFlowTheme.muted)
                                 Text(item.currentAbstract.isEmpty ? "Missing in Zotero abstractNote" : item.currentAbstract)
                                     .lineLimit(5)
                                     .textSelection(.enabled)
                                 Text("After")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(PaperFlowTheme.muted)
                                 Text(item.proposedAbstract.isEmpty ? "No proposed abstract yet. Run Repair All Dry Run." : item.proposedAbstract)
                                     .lineLimit(8)
                                     .textSelection(.enabled)
@@ -265,7 +264,7 @@ private struct MissingMetadataPane: View {
                                     .font(.headline)
                                 if item.metadataDiffs.isEmpty {
                                     Text("No repair proposal yet. Run Repair All Dry Run.")
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(PaperFlowTheme.muted)
                                 } else {
                                     ForEach(item.metadataDiffs) { diff in
                                         HStack(alignment: .top) {
@@ -274,7 +273,7 @@ private struct MissingMetadataPane: View {
                                                 .fontWeight(.medium)
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text("Before: \(diff.before.isEmpty ? "(empty)" : diff.before)")
-                                                    .foregroundStyle(.secondary)
+                                                    .foregroundStyle(PaperFlowTheme.muted)
                                                 Text("After: \(diff.after)")
                                             }
                                             Toggle(
@@ -299,7 +298,7 @@ private struct MissingMetadataPane: View {
                                     }
                                     Text("Apply Selected Repairs sends only approved fields to the backend.")
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(PaperFlowTheme.muted)
                                 }
                             }
                         }
@@ -325,7 +324,7 @@ private struct DuplicateCandidatesPane: View {
                             Spacer()
                             Text(group.matchType)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(PaperFlowTheme.muted)
                         }
                         StatusLine(label: "Canonical", value: group.canonicalItemKey)
                         StatusLine(label: "Canonical reason", value: group.canonicalReason.isEmpty ? "(not provided)" : group.canonicalReason)
@@ -338,8 +337,7 @@ private struct DuplicateCandidatesPane: View {
                         }
                     }
                     .padding(12)
-                    .background(Color(nsColor: .controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .paperFlowCard(tint: PaperFlowTheme.lilac, radius: 14)
                 }
             }
             .padding(.top, 12)
@@ -381,7 +379,7 @@ private struct CleanupItemCard<Extra: View>: View {
                 Spacer()
                 Text(item.itemKey)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
             }
             WorkbenchFlowRow(label: "Current Zotero collections", values: item.currentCollections)
             WorkbenchFlowRow(label: "Planned target collections", values: item.plannedCollections)
@@ -405,7 +403,7 @@ private struct CleanupItemCard<Extra: View>: View {
                 SmallFact(label: "Child notes", value: "\(item.childNoteCount)")
             }
             Text("Rationale: \(item.rationale)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             extra
             HStack {
                 Button("Open in Zotero") { openZoteroItem(item.itemKey) }
@@ -420,8 +418,7 @@ private struct CleanupItemCard<Extra: View>: View {
             }
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .paperFlowCard(tint: PaperFlowTheme.sky, radius: 14)
     }
 }
 
@@ -459,7 +456,7 @@ private struct DuplicateItemCard: View {
                 Spacer()
                 Text(item.itemKey)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
             }
             WorkbenchFlowRow(label: "Before", values: item.currentCollections)
             WorkbenchFlowRow(label: "After", values: item.plannedCollections)
@@ -512,7 +509,7 @@ private struct WorkbenchFlowRow: View {
         HStack(alignment: .top, spacing: 8) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .frame(width: 150, alignment: .leading)
             FlowPills(values: values)
         }
@@ -525,7 +522,7 @@ private struct FlowPills: View {
     var body: some View {
         if values.isEmpty {
             Text("(none)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
         } else {
             Text(values.joined(separator: "  •  "))
                 .font(.caption)
@@ -543,7 +540,7 @@ private struct SmallFact: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text(value.isEmpty ? "(empty)" : value)
                 .font(.caption)
                 .lineLimit(2)

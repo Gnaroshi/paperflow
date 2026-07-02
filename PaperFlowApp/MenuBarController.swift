@@ -60,11 +60,11 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func showDropShelf() {
-        AppServices.shared.shelfController?.toggleShelf()
+        AppServices.shared.toggleShelf()
     }
 
     @objc private func showCommandWindow() {
-        AppServices.shared.commandPopupWindow?.show()
+        AppServices.shared.showCommandWindow()
     }
 
     @objc private func openMainWindow() {

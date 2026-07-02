@@ -27,6 +27,7 @@ let package = Package(
                 "PaperFlowApp.swift",
                 "ContentView.swift",
                 "SettingsView.swift",
+                "AppTheme.swift",
                 "CommandRunner.swift",
                 "KeychainStore.swift",
                 "AppState.swift",

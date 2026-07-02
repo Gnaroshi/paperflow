@@ -10,14 +10,17 @@ final class DropShelfPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
+        title = "PaperFlow Floating Window"
+        setAccessibilityTitle("PaperFlow Floating Window")
         level = .floating
         collectionBehavior = []
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
+        isRestorable = false
         isMovableByWindowBackground = true
         backgroundColor = .clear
         isOpaque = false
-        hasShadow = true
+        hasShadow = false
         ignoresMouseEvents = false
     }
 

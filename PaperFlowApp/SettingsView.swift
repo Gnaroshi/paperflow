@@ -8,11 +8,14 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        ZStack {
+            PaperFlowAuroraBackground()
+                .ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
                 SectionTitle("Settings")
                 Text("경로, 단축키, 계정, Gemini, 로컬 vault 정책을 한 곳에서 관리합니다. API key 원문은 Dashboard와 로그에 표시하지 않습니다.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
 
                 settingsCard(title: "PaperFlow", icon: "folder") {
                     pathRow("Project directory", text: $state.projectPath, actionTitle: "Choose", action: state.chooseProjectDirectory)
@@ -95,7 +98,7 @@ struct SettingsView: View {
                     settingRow("Drop shelf") {
                         Text(state.dropShelfShortcutPreset.label)
                             .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                     }
                     helperText("단축키를 바꾸면 앱이 전역 hotkey를 즉시 재등록합니다.")
                 }
@@ -124,7 +127,9 @@ struct SettingsView: View {
                         WarningBox(text: "Zotero write access가 없으면 apply-migration을 막습니다.")
                     }
 
-                    Divider().opacity(0.35)
+                    Rectangle()
+                        .fill(PaperFlowTheme.line)
+                        .frame(height: 1)
 
                     subhead("Gemini")
                     if state.apiKeyStorageMode == .keychain {
@@ -146,7 +151,7 @@ struct SettingsView: View {
                     if state.geminiModel == "custom" {
                         settingRow("Custom model") {
                             TextField("Custom Gemini model", text: $state.customGeminiModel)
-                                .textFieldStyle(.roundedBorder)
+                                .paperFlowTextInput()
                                 .frame(maxWidth: 360)
                         }
                     }
@@ -196,9 +201,13 @@ struct SettingsView: View {
                     }
                 }
             }
-            .frame(maxWidth: 980, alignment: .leading)
-            .padding(.bottom, 24)
+                .frame(maxWidth: 980, alignment: .leading)
+                .padding(18)
+                .padding(.bottom, 24)
+            }
         }
+        .foregroundStyle(PaperFlowTheme.ink)
+        .preferredColorScheme(.dark)
     }
 
     private var accessGrid: some View {
@@ -226,7 +235,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .foregroundStyle(Color(red: 0.40, green: 0.42, blue: 0.86))
+                    .foregroundStyle(PaperFlowTheme.sky)
                     .frame(width: 22)
                 Text(title)
                     .font(.headline)
@@ -236,19 +245,7 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.97, green: 0.98, blue: 1.0),
-                    Color(red: 1.0, green: 0.96, blue: 0.98),
-                    Color(red: 0.94, green: 0.99, blue: 0.96)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.045), radius: 12, x: 0, y: 6)
+        .paperFlowCard(tint: PaperFlowTheme.sky, radius: 16)
     }
 
     private func settingRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
@@ -265,7 +262,7 @@ struct SettingsView: View {
     private func pathRow(_ label: String, text: Binding<String>, actionTitle: String, action: @escaping () -> Void) -> some View {
         settingRow(label) {
             TextField(label, text: text)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
                 .font(.system(.body, design: .monospaced))
                 .frame(minWidth: 260)
             Button(actionTitle, action: action)
@@ -275,7 +272,7 @@ struct SettingsView: View {
     private func secureInputRow(_ label: String, text: Binding<String>, actionTitle: String, action: @escaping () -> Void) -> some View {
         settingRow(label) {
             SecureField(label, text: text)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
                 .frame(minWidth: 260)
             Button(actionTitle, action: action)
         }
@@ -284,7 +281,7 @@ struct SettingsView: View {
     private func keyValue(_ label: String, _ value: String) -> some View {
         settingRow(label) {
             Text(value.isEmpty ? "-" : value)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .textSelection(.enabled)
         }
     }
@@ -299,7 +296,7 @@ struct SettingsView: View {
     private func helperText(_ value: String) -> some View {
         Text(value)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PaperFlowTheme.muted)
     }
 }
 
@@ -311,7 +308,7 @@ private struct MiniSettingTile: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text(value)
                 .font(.caption)
                 .fontWeight(.medium)
@@ -320,7 +317,6 @@ private struct MiniSettingTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.42))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .paperFlowCard(tint: PaperFlowTheme.lilac, radius: 10)
     }
 }

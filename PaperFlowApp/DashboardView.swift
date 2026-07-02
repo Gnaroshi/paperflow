@@ -72,12 +72,12 @@ struct DashboardView: View {
                 .font(.system(.caption, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             HStack {
                 Label(state.vaultStatus.exists ? "Vault ready" : "Vault missing", systemImage: state.vaultStatus.exists ? "externaldrive.fill" : "externaldrive.badge.xmark")
                 Spacer()
                 Text(state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)" : "Init Vault 필요")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
             }
             .font(.callout)
             HStack {
@@ -89,37 +89,24 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 168, alignment: .topLeading)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.92, green: 0.96, blue: 1.0),
-                    Color(red: 1.0, green: 0.94, blue: 0.98),
-                    Color(red: 0.92, green: 0.99, blue: 0.95)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+        .paperFlowCard(tint: PaperFlowTheme.mint, radius: 18, emphasize: true)
     }
 
     private func compactStatus(title: String, value: String, detail: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: icon)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text(value)
                 .font(.headline)
             Text(detail)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .lineLimit(1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-        .background(Color.white.opacity(0.54))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .paperFlowCard(tint: icon == "sparkles" ? PaperFlowTheme.lilac : PaperFlowTheme.sky, radius: 14)
     }
 }
 
@@ -134,8 +121,7 @@ struct SyncWarningBox: View {
         .font(.callout)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 1.0, green: 0.95, blue: 0.78).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .paperFlowCard(tint: PaperFlowTheme.amber, radius: 12)
     }
 }
 
@@ -148,15 +134,14 @@ private struct MetricTile: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text(value)
                 .font(.title2)
                 .fontWeight(.semibold)
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-        .background(tint.opacity(0.13))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .paperFlowCard(tint: tint, radius: 14)
     }
 }
 
@@ -172,7 +157,7 @@ private struct StatusCard: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(row.0)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PaperFlowTheme.muted)
                         .frame(width: 78, alignment: .leading)
                     Text(row.1)
                         .font(.caption)
@@ -185,7 +170,6 @@ private struct StatusCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
-        .background(Color.white.opacity(0.45))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .paperFlowCard(tint: PaperFlowTheme.lilac, radius: 14)
     }
 }

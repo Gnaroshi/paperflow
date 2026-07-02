@@ -9,7 +9,7 @@ struct ExistingAttachmentsView: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionTitle("Existing Attachments")
             Text("Migrate existing stored Zotero PDFs into local linked PDFs while preserving notes, highlights, underlines, annotations, and child notes.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
                 WorkflowButton(title: "Plan Localize Stored PDFs", icon: "map") {
@@ -29,11 +29,11 @@ struct ExistingAttachmentsView: View {
                 Text("Danger zone")
                     .font(.headline)
                 Text("Cleanup should run only after the verify report succeeded.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 Text("Cleanup must never delete attachments with notes, highlights, or annotations unless explicitly reviewed.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 TextField("DELETE OLD STORED PDF ATTACHMENTS", text: $cleanupConfirmation)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
 
                 HStack {
                     Button(role: .destructive) {

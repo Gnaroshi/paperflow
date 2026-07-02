@@ -7,7 +7,7 @@ struct LocalVaultView: View {
         VStack(alignment: .leading, spacing: 16) {
             SectionTitle("Local Vault")
             Text("PDFs live in the local PaperFlow vault to avoid Zotero Storage usage. Zotero keeps metadata, collections, tags, notes, and annotations.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
                 InfoTile(title: "Vault path", value: state.vaultPath)

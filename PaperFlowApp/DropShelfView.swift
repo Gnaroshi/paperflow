@@ -45,9 +45,13 @@ struct DropShelfView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
+        .background(
+            Capsule()
+                .fill(PaperFlowTheme.panelGradient(tint: PaperFlowTheme.mint))
+        )
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.accentColor.opacity(0.35)))
+        .foregroundStyle(PaperFlowTheme.ink)
+        .shadow(color: PaperFlowTheme.mint.opacity(0.20), radius: 18, x: 0, y: 10)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             controller.compactLeftClick(clickCount: 2)
@@ -86,9 +90,11 @@ struct DropShelfView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(dragHighlightActive ? 0.58 : 0.26), lineWidth: dragHighlightActive ? 1.5 : 1)
+                .stroke(theme.glow.opacity(dragHighlightActive ? 0.82 : 0.0), lineWidth: dragHighlightActive ? 2.5 : 0)
         )
-        .shadow(color: borderColor.opacity(dragHighlightActive ? 0.34 : 0.16), radius: dragHighlightActive ? 30 : 22, x: 0, y: 14)
+        .shadow(color: theme.glow.opacity(dragHighlightActive ? 0.30 : 0.13), radius: dragHighlightActive ? 34 : 24, x: 0, y: 16)
+        .foregroundStyle(PaperFlowTheme.ink)
+        .preferredColorScheme(.dark)
         .scaleEffect(dragHighlightActive ? 1.015 : 1)
         .animation(.easeOut(duration: 0.16), value: dragHighlightActive)
     }
@@ -105,7 +111,7 @@ struct DropShelfView: View {
                     .font(.headline)
                 Text(state.shelfLastResult)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 }
@@ -200,7 +206,7 @@ struct DropShelfView: View {
         .font(.caption)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.thinMaterial)
+        .background(PaperFlowTheme.panel0.opacity(0.86))
     }
 
     @ViewBuilder
@@ -220,7 +226,7 @@ struct DropShelfView: View {
             safetyOptionsView
             if state.dropShelfAction == .applyIngest {
                 TextField("Type INGEST LOCAL PDFS", text: $applyConfirmation)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
             }
         }
     }
@@ -252,7 +258,7 @@ struct DropShelfView: View {
                     if state.droppedPDFs.count > 3 {
                         Text("+ \(state.droppedPDFs.count - 3) more")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                     }
                 }
                 .frame(maxHeight: 76)
@@ -307,7 +313,7 @@ struct DropShelfView: View {
             }
             Text("Data sync and file sync are separate. Local linked PDFs should not consume Zotero Storage.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
         }
     }
 
@@ -332,7 +338,7 @@ struct DropShelfView: View {
                 .fontWeight(.semibold)
             Text("Apply Migration requires typed confirmation in the main window. It changes collections/tags only and should not delete notes, annotations, highlights, or attachments.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             HStack {
                 Button("Backup") { state.runBackupZotero() }
                 Button("Plan Migration") { state.runPlanMigration() }
@@ -364,7 +370,7 @@ struct DropShelfView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
                 .padding(8)
-                .background(Color.white.opacity(0.46))
+                .background(PaperFlowTheme.canvas0.opacity(0.78))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
@@ -377,7 +383,7 @@ struct DropShelfView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(label)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 Text(value)
                     .font(.caption)
                     .fontWeight(.medium)
@@ -385,8 +391,7 @@ struct DropShelfView: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.38))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .paperFlowCard(tint: PaperFlowTheme.sky, radius: 12)
         }
     }
 
@@ -397,18 +402,13 @@ struct DropShelfView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.62),
-                    Color.white.opacity(0.20),
-                    Color(red: 0.70, green: 0.82, blue: 1.0).opacity(0.16)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
+            RadialGradient(
+                colors: [theme.glow.opacity(0.22), .clear],
+                center: .topTrailing,
+                startRadius: 24,
+                endRadius: 420
             )
-            Rectangle()
-                .fill(.regularMaterial)
-                .opacity(0.66)
+            PaperFlowTheme.panel0.opacity(0.64)
         }
     }
 
@@ -435,45 +435,51 @@ struct DropShelfView: View {
 
     private struct PFWTheme {
         let background: [Color]
-        let border: Color
+        let glow: Color
 
         static let idle = PFWTheme(
-            background: [Color(red: 0.93, green: 0.95, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.98), Color(red: 0.91, green: 0.99, blue: 0.96)],
-            border: Color(red: 0.46, green: 0.48, blue: 0.82)
+            background: [PaperFlowTheme.canvas0, PaperFlowTheme.panel0, Color(red: 0.095, green: 0.075, blue: 0.135)],
+            glow: PaperFlowTheme.sky
         )
         static let queued = PFWTheme(
-            background: [Color(red: 0.86, green: 0.94, blue: 1.0), Color(red: 0.98, green: 0.92, blue: 1.0), Color(red: 0.92, green: 0.99, blue: 0.94)],
-            border: Color(red: 0.32, green: 0.42, blue: 0.90)
+            background: [Color(red: 0.045, green: 0.075, blue: 0.120), PaperFlowTheme.panel1, Color(red: 0.105, green: 0.070, blue: 0.165)],
+            glow: PaperFlowTheme.lilac
         )
         static let validDrop = PFWTheme(
-            background: [Color(red: 0.78, green: 0.98, blue: 0.91), Color(red: 0.84, green: 0.94, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.82)],
-            border: Color(red: 0.12, green: 0.68, blue: 0.62)
+            background: [Color(red: 0.035, green: 0.115, blue: 0.100), Color(red: 0.050, green: 0.105, blue: 0.155), PaperFlowTheme.panel0],
+            glow: PaperFlowTheme.mint
         )
         static let invalidDrop = PFWTheme(
-            background: [Color(red: 1.0, green: 0.88, blue: 0.84), Color(red: 1.0, green: 0.96, blue: 0.76), Color(red: 0.96, green: 0.90, blue: 1.0)],
-            border: Color(red: 0.92, green: 0.32, blue: 0.24)
+            background: [Color(red: 0.150, green: 0.060, blue: 0.080), Color(red: 0.135, green: 0.085, blue: 0.115), PaperFlowTheme.panel0],
+            glow: PaperFlowTheme.rose
         )
         static let processing = PFWTheme(
-            background: [Color(red: 0.90, green: 0.89, blue: 1.0), Color(red: 0.82, green: 0.96, blue: 1.0), Color(red: 1.0, green: 0.92, blue: 0.98)],
-            border: Color(red: 0.44, green: 0.44, blue: 0.92)
+            background: [Color(red: 0.055, green: 0.065, blue: 0.145), Color(red: 0.065, green: 0.105, blue: 0.165), PaperFlowTheme.panel0],
+            glow: PaperFlowTheme.lilac
         )
         static let success = PFWTheme(
-            background: [Color(red: 0.80, green: 0.98, blue: 0.90), Color(red: 0.90, green: 0.99, blue: 0.82), Color(red: 0.84, green: 0.94, blue: 1.0)],
-            border: Color(red: 0.12, green: 0.64, blue: 0.38)
+            background: [Color(red: 0.035, green: 0.125, blue: 0.095), PaperFlowTheme.panel1, Color(red: 0.045, green: 0.090, blue: 0.135)],
+            glow: PaperFlowTheme.mint
         )
         static let failure = PFWTheme(
-            background: [Color(red: 1.0, green: 0.86, blue: 0.90), Color(red: 1.0, green: 0.92, blue: 0.98), Color(red: 0.94, green: 0.92, blue: 1.0)],
-            border: Color(red: 0.86, green: 0.22, blue: 0.36)
+            background: [Color(red: 0.150, green: 0.055, blue: 0.085), Color(red: 0.115, green: 0.070, blue: 0.125), PaperFlowTheme.panel0],
+            glow: PaperFlowTheme.rose
         )
         static let warning = PFWTheme(
-            background: [Color(red: 1.0, green: 0.96, blue: 0.76), Color(red: 1.0, green: 0.90, blue: 0.78), Color(red: 0.92, green: 0.96, blue: 1.0)],
-            border: Color(red: 0.86, green: 0.52, blue: 0.12)
+            background: [Color(red: 0.145, green: 0.095, blue: 0.045), Color(red: 0.120, green: 0.080, blue: 0.100), PaperFlowTheme.panel0],
+            glow: PaperFlowTheme.amber
         )
     }
 
     private var softSeparator: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.30))
+            .fill(
+                LinearGradient(
+                    colors: [.clear, PaperFlowTheme.sky.opacity(0.20), PaperFlowTheme.lilac.opacity(0.18), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
             .frame(height: 1)
     }
 
@@ -492,23 +498,23 @@ struct DropShelfView: View {
                     Text("Stage: \(stageLabel(state.runner.currentStage))")
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(state.runner.currentCommand.isEmpty ? "paperflow command is running" : state.runner.currentCommand)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(state.runner.currentWorkingDirectory)
                     .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.faint)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !state.runner.lastHeartbeat.isEmpty {
                     Text(state.runner.lastHeartbeat)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PaperFlowTheme.muted)
                 }
                 if let warning = state.runner.noOutputWarning {
                     Text(warning)
@@ -521,7 +527,7 @@ struct DropShelfView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
                 .padding(8)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.8))
+                .background(PaperFlowTheme.canvas0.opacity(0.86))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             HStack {
                 Button("Open Debug Log") { state.runner.openLogFile() }
@@ -562,11 +568,11 @@ struct DropShelfView: View {
                     Text("No Zotero writes executed")
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 if !state.runner.finalProgressMessage.isEmpty {
                     Text(state.runner.finalProgressMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PaperFlowTheme.muted)
                 }
                 ingestPlanSummary
                 HStack {
@@ -581,7 +587,7 @@ struct DropShelfView: View {
                 if !state.droppedPDFs.isEmpty {
                     HStack {
                         TextField("Type INGEST LOCAL PDFS to enable Apply Ingest", text: $applyConfirmation)
-                            .textFieldStyle(.roundedBorder)
+                            .paperFlowTextInput()
                         Button(role: .destructive) {
                             state.dropShelfAction = .applyIngest
                             state.runDropShelfSelectedAction()
@@ -617,7 +623,7 @@ struct DropShelfView: View {
             if rows.isEmpty {
                 Text(state.shelfLastResult)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
             } else {
                 ForEach(rows.prefix(2), id: \.targetPath) { row in
                     VStack(alignment: .leading, spacing: 3) {
@@ -626,7 +632,7 @@ struct DropShelfView: View {
                             .fontWeight(.semibold)
                         Text(row.mode == "apply" ? "Applied" : "Planned destination")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                         Text("Source file: \(row.sourceFile)")
                             .font(.caption)
                             .lineLimit(1)
@@ -637,21 +643,21 @@ struct DropShelfView: View {
                             .truncationMode(.middle)
                         Text("Storage: \(row.storageMode); upload to Zotero Storage: \(row.uploadToZoteroStorage ? "true" : "false")")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                         Text("Planned collections: \(row.collections.isEmpty ? "not available" : row.collections.joined(separator: ", "))")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text("Planned tags: \(row.tags.isEmpty ? "not available" : row.tags.joined(separator: ", "))")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PaperFlowTheme.muted)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         if let operation = row.zoteroOperation {
                             Text("Planned Zotero item: \(operation). \(row.zoteroItemKey ?? "Not created yet - this was a dry run.")")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(PaperFlowTheme.muted)
                         }
                         if let openURI = row.zoteroOpenURI, row.mode == "apply" {
                             Button("Open in Zotero") {
@@ -663,8 +669,7 @@ struct DropShelfView: View {
                         }
                     }
                     .padding(10)
-                    .background(Color.white.opacity(0.38))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .paperFlowCard(tint: PaperFlowTheme.sky, radius: 12)
                 }
             }
         }
@@ -801,7 +806,7 @@ struct DropShelfView: View {
                     )
                     if index < stages.count - 1 {
                         Rectangle()
-                            .fill(completedStages.contains(stage.0) ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.25))
+            .fill(completedStages.contains(stage.0) ? PaperFlowTheme.mint.opacity(0.65) : PaperFlowTheme.faint.opacity(0.35))
                             .frame(height: 2)
                     }
                 }
@@ -817,11 +822,11 @@ struct DropShelfView: View {
         var body: some View {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(filled ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .fill(filled ? PaperFlowTheme.mint : PaperFlowTheme.faint.opacity(0.45))
                     .frame(width: active ? 11 : 9, height: active ? 11 : 9)
                 Text(label)
                     .font(.caption2)
-                    .foregroundStyle(filled ? .primary : .secondary)
+                    .foregroundStyle(filled ? PaperFlowTheme.ink : PaperFlowTheme.muted)
             }
         }
     }
@@ -867,14 +872,14 @@ struct DropShelfView: View {
                 .fontWeight(.medium)
             Text(dropTargetSubtitle)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
         }
         .frame(maxWidth: .infinity, minHeight: 92)
         .background(dropTargetBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(borderColor.opacity(dragHighlightActive ? 0.8 : 0.35), style: StrokeStyle(lineWidth: dragHighlightActive ? 2 : 1, dash: [5]))
+                .stroke(theme.glow.opacity(dragHighlightActive ? 0.78 : 0.0), style: StrokeStyle(lineWidth: dragHighlightActive ? 2 : 0, dash: [6]))
         )
     }
 
@@ -907,16 +912,12 @@ struct DropShelfView: View {
     private var dropTargetBackground: Color {
         switch state.dropShelfPhase {
         case .hoveringInvalidFile:
-            return Color.red.opacity(0.14)
+            return PaperFlowTheme.rose.opacity(0.18)
         case .hoveringValidPDF:
-            return Color.accentColor.opacity(0.18)
+            return PaperFlowTheme.mint.opacity(0.16)
         default:
-            return Color.accentColor.opacity(0.08)
+            return PaperFlowTheme.panel2.opacity(0.62)
         }
-    }
-
-    private var borderColor: Color {
-        theme.border
     }
 
     fileprivate static func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {

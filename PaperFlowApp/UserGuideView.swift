@@ -60,30 +60,19 @@ struct UserGuideView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(Color(red: 0.36, green: 0.40, blue: 0.86))
+                .foregroundStyle(PaperFlowTheme.mint)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.headline)
                 Text(text)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                     .lineSpacing(2)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.96, green: 0.97, blue: 1.0),
-                    Color(red: 1.0, green: 0.96, blue: 0.98)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+        .paperFlowCard(tint: PaperFlowTheme.lilac, radius: 16)
     }
 }

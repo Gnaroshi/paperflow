@@ -65,7 +65,7 @@ final class CommandPopupPanel: NSPanel {
         isReleasedWhenClosed = false
         backgroundColor = .clear
         isOpaque = false
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = true
     }
 

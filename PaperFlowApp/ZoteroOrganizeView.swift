@@ -34,17 +34,17 @@ struct ZoteroOrganizeView: View {
                 Text("Apply Migration")
                     .font(.headline)
                 Text("This changes Zotero collections/tags only. It does not move PDFs.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 Text("If Web API is used, Zotero Desktop may need data sync before changes are visible.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 Text("This should not delete notes, annotations, highlights, or attachments.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
                 if !state.zoteroVerification.writeAccess {
                     Text("Zotero API key write access is not verified. Use Settings > Accounts & API Keys before applying.")
                         .foregroundStyle(.red)
                 }
                 TextField("REPLACE MY ZOTERO COLLECTIONS", text: $applyConfirmation)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
 
                 HStack {
                     Button(role: .destructive) {

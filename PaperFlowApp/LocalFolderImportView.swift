@@ -59,7 +59,7 @@ struct LocalFolderImportView: View {
         VStack(alignment: .leading, spacing: 16) {
             SectionTitle("Local Folder Import")
             Text("Recursively scan local PDFs, exclude papers already in Zotero, classify only new papers, then copy them into the local vault as linked-local Zotero attachments.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
 
             WarningBox(text: "Dry-run steps perform no file copies and no Zotero writes. Apply Import copies PDFs to the local vault and creates linked attachments only. Zotero Storage upload is always false.")
 
@@ -94,7 +94,7 @@ struct LocalFolderImportView: View {
                     Label("Choose Folder", systemImage: "folder")
                 }
                 TextField("Terminal path", text: $state.localImportPath)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
                     .font(.system(.body, design: .monospaced))
                 Button("Refresh Results") {
                     state.refreshLocalImportStatus()
@@ -109,7 +109,7 @@ struct LocalFolderImportView: View {
             HStack(alignment: .top, spacing: 18) {
                 Toggle("Recursive", isOn: $state.localImportRecursive)
                 TextField("Max depth", text: $state.localImportMaxDepth)
-                    .textFieldStyle(.roundedBorder)
+                    .paperFlowTextInput()
                     .frame(width: 92)
                 Toggle("Exclude existing Zotero items", isOn: $state.localImportExcludeExistingZotero)
                 Toggle("Use Gemini for ambiguous classification", isOn: $state.localImportUseGemini)
@@ -152,7 +152,7 @@ struct LocalFolderImportView: View {
             }
             Text("Match Zotero runs `local index-zotero` followed by `local match-zotero`. Apply Import requires typing `IMPORT LOCAL PAPERS`.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
         }
     }
 
@@ -203,9 +203,12 @@ struct LocalFolderImportView: View {
                 .frame(minWidth: 1900, alignment: .leading)
             }
             .frame(minHeight: 360)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
+            .background(PaperFlowTheme.panel0.opacity(0.92))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(PaperFlowTheme.line, lineWidth: 1)
+            )
         }
     }
 
@@ -224,7 +227,7 @@ struct LocalFolderImportView: View {
             headerCell("action", width: 180)
             headerCell("row actions", width: 620)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(PaperFlowTheme.panel1.opacity(0.92))
     }
 
     private func rowView(_ row: LocalImportRow) -> some View {
@@ -248,7 +251,7 @@ struct LocalFolderImportView: View {
         Text(text)
             .font(.caption)
             .fontWeight(.semibold)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PaperFlowTheme.muted)
             .frame(width: width, alignment: .leading)
             .padding(8)
     }
@@ -311,7 +314,7 @@ struct LocalFolderImportView: View {
             StatusLine(label: "Tags", value: effectiveTags(for: row))
             StatusLine(label: "Confidence", value: row.confidence > 0 ? String(format: "%.2f", row.confidence) : "-")
             Text(row.rationale.isEmpty ? "No rationale was found in the current reports." : row.rationale)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .textSelection(.enabled)
             if !row.copiedFilePath.isEmpty || !row.zoteroItemKey.isEmpty || !row.linkedAttachmentStatus.isEmpty {
                 Divider()
@@ -334,9 +337,9 @@ struct LocalFolderImportView: View {
                 .font(.title3)
                 .fontWeight(.semibold)
             Text("This is a local UI review override only; backend row-edit persistence is not implemented yet.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             TextField("Value", text: $editText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
                 .lineLimit(3...6)
             HStack {
                 Spacer()
@@ -364,12 +367,12 @@ struct LocalFolderImportView: View {
                 .font(.headline)
                 .textSelection(.enabled)
             Text("Save this correction as a reusable user taxonomy rule. PaperFlow will append it to `config/user_taxonomy_overrides.yaml` and re-run local pending classification.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             TextField("Target collection", text: $correctCollectionText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
                 .lineLimit(2...4)
             TextField("Tags separated by semicolons or commas", text: $correctTagsText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
                 .lineLimit(3...6)
             HStack {
                 Spacer()

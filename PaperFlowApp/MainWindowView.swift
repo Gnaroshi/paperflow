@@ -9,37 +9,46 @@ struct MainWindowView: View {
     var body: some View {
         GeometryReader { geometry in
             let sidebarWidth = sidebarCollapsed ? 56 : min(260, max(228, geometry.size.width * 0.22))
-            HStack(spacing: 0) {
-                SidebarRailOrFullSidebar(
-                    selectedSection: $state.selectedSection,
-                    isCollapsed: $sidebarCollapsed
-                )
-                .frame(width: sidebarWidth)
-                .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
+            ZStack {
+                PaperFlowAuroraBackground()
+                    .ignoresSafeArea()
+                HStack(spacing: 0) {
+                    SidebarRailOrFullSidebar(
+                        selectedSection: $state.selectedSection,
+                        isCollapsed: $sidebarCollapsed
+                    )
+                    .frame(width: sidebarWidth)
+                    .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
 
-                Divider()
+                    Rectangle()
+                        .fill(PaperFlowTheme.line)
+                        .frame(width: 1)
 
-                VStack(spacing: 0) {
-                    HeaderView()
-                    Divider()
-                    ScrollView {
-                        sectionView
-                            .padding(.horizontal, geometry.size.width < 1180 ? 12 : 16)
-                            .padding(.vertical, 14)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    VStack(spacing: 0) {
+                        HeaderView()
+                        Rectangle()
+                            .fill(PaperFlowTheme.line)
+                            .frame(height: 1)
+                        ScrollView {
+                            sectionView
+                                .padding(.horizontal, geometry.size.width < 1180 ? 12 : 16)
+                                .padding(.vertical, 14)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        Rectangle()
+                            .fill(PaperFlowTheme.line)
+                            .frame(height: 1)
+                        CommandLogView(runner: state.runner)
+                            .padding(10)
+                            .frame(minHeight: 128, idealHeight: 164, maxHeight: geometry.size.height < 820 ? 190 : 260)
                     }
-                    Divider()
-                    CommandLogView(runner: state.runner)
-                        .padding(10)
-                        .frame(minHeight: 128, idealHeight: 164, maxHeight: geometry.size.height < 820 ? 190 : 260)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .foregroundStyle(PaperFlowTheme.ink)
+        .preferredColorScheme(.dark)
         .frame(minWidth: 980, minHeight: 700)
-        .onAppear {
-            state.refreshStatus()
-        }
         .onChange(of: state.runner.status) { status in
             if status != .running {
                 state.refreshStatus()
@@ -90,11 +99,11 @@ struct MainWindowView: View {
                 .font(.title3)
                 .fontWeight(.semibold)
             Text(kind.warning)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text("Type \(kind.requiredText) to continue.")
                 .font(.caption)
             TextField("Confirmation", text: $confirmationText)
-                .textFieldStyle(.roundedBorder)
+                .paperFlowTextInput()
             HStack {
                 Spacer()
                 Button("Cancel") {
@@ -175,7 +184,7 @@ private struct SidebarRailOrFullSidebar: View {
                             .padding(.horizontal, isCollapsed ? 8 : 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(selectedSection == section ? Color.accentColor.opacity(0.14) : Color.clear)
+                                    .fill(selectedSection == section ? PaperFlowTheme.sky.opacity(0.18) : Color.clear)
                             )
                             .contentShape(Rectangle())
                         }
@@ -190,8 +199,8 @@ private struct SidebarRailOrFullSidebar: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(red: 0.96, green: 0.97, blue: 1.0),
-                    Color(red: 0.98, green: 0.95, blue: 0.98)
+                    PaperFlowTheme.canvas0,
+                    PaperFlowTheme.panel0.opacity(0.92)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -211,13 +220,13 @@ struct HeaderView: View {
                     .fontWeight(.semibold)
                 Text("Status: \(state.statusText) • queued: \(state.runner.queuedCount)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PaperFlowTheme.muted)
             }
             Spacer()
-            Button { AppServices.shared.shelfController?.toggleShelf() } label: {
+            Button { AppServices.shared.toggleShelf() } label: {
                 Label("Shelf", systemImage: "tray.and.arrow.down")
             }
-            Button { AppServices.shared.commandPopupWindow?.show() } label: {
+            Button { AppServices.shared.showCommandWindow() } label: {
                 Label("Command", systemImage: "command")
             }
             Button { state.refreshStatus() } label: {
@@ -231,6 +240,7 @@ struct HeaderView: View {
             }
         }
         .padding(14)
+        .background(PaperFlowTheme.canvas0.opacity(0.72))
     }
 }
 
@@ -241,7 +251,7 @@ struct DropShelfSettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SectionTitle("Drop Shelf Settings")
             Text("The shelf is hidden by default and appears with ⌃⇧⌘+. Hot-zones are optional because macOS does not deliver global drag events until the cursor enters one of PaperFlow's windows.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
 
             Toggle("Enable hot-zone", isOn: $state.hotZoneEnabled)
             Picker("Activation mode", selection: $state.dropShelfActivationMode) {
@@ -285,7 +295,7 @@ struct DropShelfSettingsView: View {
             }
             Text("Idle opacity: \(state.hotZoneIdleOpacity, specifier: "%.2f")")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Toggle("Auto-hide after successful dry-run/apply", isOn: $state.autoHideAfterSuccess)
             Toggle("Auto dry-run after drop", isOn: $state.autoDryRunAfterDrop)
             Stepper("Auto-collapse delay: \(Int(state.autoCollapseDelay)) seconds", value: $state.autoCollapseDelay, in: 1...20, step: 1)
@@ -337,7 +347,7 @@ struct CommandLogView: View {
             }
             Text(runner.currentCommand.isEmpty ? "No command running." : runner.currentCommand)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .lineLimit(1)
                 .truncationMode(.middle)
             ScrollViewReader { proxy in
@@ -350,9 +360,8 @@ struct CommandLogView: View {
                         .padding(8)
                         .id("bottom")
                 }
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
+                .background(PaperFlowTheme.canvas0.opacity(0.86))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .onChange(of: runner.output) { _ in
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
@@ -374,7 +383,7 @@ struct SectionTitle: View {
             .fontWeight(.bold)
             .foregroundStyle(
                 LinearGradient(
-                    colors: [Color(red: 0.22, green: 0.24, blue: 0.58), Color(red: 0.54, green: 0.34, blue: 0.72)],
+                    colors: [PaperFlowTheme.mint, PaperFlowTheme.sky, PaperFlowTheme.lilac],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
@@ -390,7 +399,7 @@ struct InfoTile: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
             Text(value)
                 .font(.body)
                 .lineLimit(3)
@@ -398,18 +407,7 @@ struct InfoTile: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.96, green: 0.97, blue: 1.0),
-                    Color(red: 1.0, green: 0.96, blue: 0.98)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: Color.black.opacity(0.035), radius: 8, x: 0, y: 4)
+        .paperFlowCard(tint: PaperFlowTheme.sky, radius: 14)
     }
 }
 
@@ -423,7 +421,7 @@ struct StatusLine: View {
                 .fontWeight(.medium)
                 .frame(width: 150, alignment: .leading)
             Text(value)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PaperFlowTheme.muted)
                 .textSelection(.enabled)
                 .lineLimit(2)
                 .truncationMode(.middle)
@@ -452,10 +450,9 @@ struct WarningBox: View {
     var body: some View {
         Text(text)
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PaperFlowTheme.muted)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(red: 1.0, green: 0.95, blue: 0.78).opacity(0.55))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .paperFlowCard(tint: PaperFlowTheme.amber, radius: 12)
     }
 }
