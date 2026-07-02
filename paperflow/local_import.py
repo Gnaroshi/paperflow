@@ -696,6 +696,145 @@ def newer_arxiv_version(local_id: str | None, zotero_id: str | None) -> bool:
     return bool(local_version and zotero_version and local_version > zotero_version)
 
 
+def resolved_path_string(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return str(Path(value).expanduser().resolve(strict=False))
+    except Exception:
+        return str(Path(value).expanduser().absolute())
+
+
+def same_resolved_path(local_path: str, attachment_paths: list[str]) -> bool:
+    local_resolved = resolved_path_string(local_path)
+    for attachment_path in attachment_paths:
+        attachment_resolved = resolved_path_string(attachment_path)
+        if local_resolved and attachment_resolved and local_resolved == attachment_resolved:
+            return True
+        try:
+            if local_path and attachment_path and Path(local_path).expanduser().samefile(Path(attachment_path).expanduser()):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def local_duplicate_keys(scan_row: dict[str, Any]) -> list[tuple[str, str]]:
+    detected = scan_row.get("detected", {})
+    keys: list[tuple[str, str]] = []
+    doi = normalize_doi(detected.get("doi"))
+    if doi:
+        keys.append(("doi", doi))
+    base = arxiv_base(detected.get("arxiv_id"))
+    if base:
+        keys.append(("arxiv_base", base))
+    sha = scan_row.get("sha256")
+    if sha:
+        keys.append(("sha256", str(sha)))
+    return keys
+
+
+def metadata_clarity_score(scan_row: dict[str, Any]) -> int:
+    detected = scan_row.get("detected", {})
+    score = 0
+    if scan_row.get("scan_status") == "ok":
+        score += 3
+    if normalize_doi(detected.get("doi")):
+        score += 4
+    if detected.get("arxiv_id"):
+        score += 4
+    if detected.get("title"):
+        score += 3
+    if detected.get("year"):
+        score += 2
+    if detected.get("abstract_present") or scan_row.get("first_page_abstract_candidate"):
+        score += 3
+    if scan_row.get("pdf_metadata_author"):
+        score += 1
+    if scan_row.get("page_count"):
+        score += 1
+    if not scan_row.get("errors"):
+        score += 1
+    return score
+
+
+def modified_timestamp(scan_row: dict[str, Any]) -> float:
+    value = scan_row.get("modified_at")
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except Exception:
+        return 0.0
+
+
+def canonical_local_sort_key(scan_row: dict[str, Any]) -> tuple[int, int, int, int, float]:
+    detected = scan_row.get("detected", {})
+    return (
+        metadata_clarity_score(scan_row),
+        arxiv_version(detected.get("arxiv_id")) or 0,
+        int(scan_row.get("size_bytes") or 0),
+        -len(resolved_path_string(scan_row.get("path"))),
+        modified_timestamp(scan_row),
+    )
+
+
+def local_duplicate_groups(scan_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    parent = list(range(len(scan_rows)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    seen: dict[tuple[str, str], int] = {}
+    for index, row in enumerate(scan_rows):
+        for key in local_duplicate_keys(row):
+            if key in seen:
+                union(index, seen[key])
+            else:
+                seen[key] = index
+
+    groups: dict[int, list[int]] = {}
+    for index, row in enumerate(scan_rows):
+        if not local_duplicate_keys(row):
+            continue
+        groups.setdefault(find(index), []).append(index)
+
+    duplicates: dict[str, dict[str, Any]] = {}
+    for group_indices in groups.values():
+        if len(group_indices) < 2:
+            continue
+        canonical_index = max(group_indices, key=lambda idx: canonical_local_sort_key(scan_rows[idx]))
+        canonical = scan_rows[canonical_index]
+        canonical_path = canonical.get("path")
+        canonical_keys = set(local_duplicate_keys(canonical))
+        for index in group_indices:
+            if index == canonical_index:
+                continue
+            row = scan_rows[index]
+            shared = sorted({f"{kind}:{value}" for kind, value in canonical_keys & set(local_duplicate_keys(row))})
+            duplicates[str(row.get("path"))] = {
+                "canonical_local_path": canonical_path,
+                "canonical_filename": canonical.get("filename"),
+                "local_duplicate_reason": ", ".join(shared) or "same DOI/arXiv/hash as canonical local file",
+                "canonical_selection": {
+                    "metadata_clarity_score": metadata_clarity_score(canonical),
+                    "arxiv_version": arxiv_version((canonical.get("detected") or {}).get("arxiv_id")),
+                    "size_bytes": canonical.get("size_bytes"),
+                    "modified_at": canonical.get("modified_at"),
+                },
+            }
+    return duplicates
+
+
 def match_scan_row(scan_row: dict[str, Any], zotero_items: list[dict[str, Any]]) -> dict[str, Any]:
     if scan_row.get("scan_status") != "ok":
         return {
@@ -716,24 +855,22 @@ def match_scan_row(scan_row: dict[str, Any], zotero_items: list[dict[str, Any]])
     normalized_titles = [normalize_title_v3(title) for title in title_values_for_scan(scan_row)]
     local_year = detected.get("year")
     local_author = local_first_author(scan_row)
-    local_path = str(Path(scan_row.get("path")).expanduser())
+    local_path = str(scan_row.get("path") or "")
     local_sha = scan_row.get("sha256")
     best_possible: tuple[float, dict[str, Any], str] | None = None
-    best_likely: tuple[float, dict[str, Any], str] | None = None
 
     for item in zotero_items:
+        item_arxiv_base = item.get("arxiv_base_id") or arxiv_base(item.get("arxiv_id"))
         if doi and doi == item.get("doi_normalized"):
             return match_result(scan_row, item, "exact_existing", "same DOI", 1.0)
-        if arxiv_id and arxiv_id == item.get("arxiv_id"):
-            return match_result(scan_row, item, "exact_existing", "same arXiv ID", 1.0)
-        if local_base and local_base == item.get("arxiv_base_id"):
+        if local_base and local_base == item_arxiv_base:
             if newer_arxiv_version(arxiv_id, item.get("arxiv_id")):
                 return match_result(scan_row, item, "update_candidate", "newer arXiv version", 0.97)
             return match_result(scan_row, item, "exact_existing", "same arXiv base ID", 0.98)
-        if local_sha and local_sha in set(item.get("attachment_sha256", [])):
+        if local_sha and local_sha in {sha for sha in item.get("attachment_sha256", []) if sha}:
             return match_result(scan_row, item, "exact_existing", "same PDF SHA256", 1.0)
-        if local_path in set(item.get("attachment_paths", [])):
-            return match_result(scan_row, item, "exact_existing", "same attachment local path", 1.0)
+        if same_resolved_path(local_path, item.get("attachment_paths", [])):
+            return match_result(scan_row, item, "exact_existing", "same resolved attachment local path", 1.0)
         if (
             local_year
             and item.get("year") == local_year
@@ -745,16 +882,13 @@ def match_scan_row(scan_row: dict[str, Any], zotero_items: list[dict[str, Any]])
 
         same_title = any(title and title == item.get("normalized_title") for title in normalized_titles)
         if same_title:
-            best_likely = max_match(best_likely, (0.94, item, "same normalized title"))
+            best_possible = max_match(best_possible, (0.95, item, "same normalized title; needs review"))
         similarity = best_title_similarity(scan_row, item)
-        if similarity >= 96 and year_close(local_year, item.get("year")):
-            best_likely = max_match(best_likely, (similarity / 100, item, "fuzzy title >= 0.96 and year within +/-1"))
-        elif similarity >= 90:
-            best_possible = max_match(best_possible, (similarity / 100, item, "fuzzy title >= 0.90"))
+        if similarity >= 90 and not (doi or arxiv_id):
+            best_possible = max_match(best_possible, (similarity / 100, item, "fuzzy title >= 0.90 without DOI/arXiv"))
+        elif similarity >= 96:
+            best_possible = max_match(best_possible, (similarity / 100, item, "fuzzy title >= 0.96; needs review"))
 
-    if best_likely:
-        confidence, item, reason = best_likely
-        return match_result(scan_row, item, "likely_existing", reason, confidence)
     if best_possible:
         confidence, item, reason = best_possible
         return match_result(scan_row, item, "possible_existing", reason, confidence)
@@ -794,7 +928,8 @@ def match_result(
     confidence: float,
 ) -> dict[str, Any]:
     reading_work = bool(item.get("reading_work_present"))
-    return {
+    detected = scan_row.get("detected", {})
+    result = {
         "local_path": scan_row.get("path"),
         "match_status": status,
         "matched_zotero_item_key": item.get("item_key"),
@@ -806,10 +941,47 @@ def match_result(
         "reading_work_present_on_existing": reading_work,
         "unsafe_auto_replace": reading_work,
     }
+    if status == "update_candidate":
+        result.update(
+            {
+                "existing_arxiv_id": item.get("arxiv_id"),
+                "local_arxiv_id": detected.get("arxiv_id"),
+                "existing_version": arxiv_version(item.get("arxiv_id")),
+                "local_version": arxiv_version(detected.get("arxiv_id")),
+                "suggested_action": "attach new version or replace linked PDF after review",
+                "safe_to_replace_existing_pdf": not reading_work,
+            }
+        )
+    return result
+
+
+def local_duplicate_match_result(scan_row: dict[str, Any], duplicate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "local_path": scan_row.get("path"),
+        "match_status": "local_duplicate",
+        "matched_zotero_item_key": None,
+        "matched_zotero_title": None,
+        "match_reason": duplicate.get("local_duplicate_reason") or "duplicate local file",
+        "match_confidence": 1.0,
+        "safe_to_import": False,
+        "safe_to_replace_existing_pdf": False,
+        "reading_work_present_on_existing": False,
+        "unsafe_auto_replace": False,
+        "canonical_local_path": duplicate.get("canonical_local_path"),
+        "canonical_filename": duplicate.get("canonical_filename"),
+        "canonical_selection": duplicate.get("canonical_selection", {}),
+    }
 
 
 def match_local_to_zotero(scan: dict[str, Any], index: dict[str, Any]) -> dict[str, Any]:
-    matches = [match_scan_row(row, index.get("items", [])) for row in scan.get("files", [])]
+    rows = list(scan.get("files", []))
+    local_duplicates = local_duplicate_groups(rows)
+    matches = [
+        local_duplicate_match_result(row, local_duplicates[str(row.get("path"))])
+        if str(row.get("path")) in local_duplicates
+        else match_scan_row(row, index.get("items", []))
+        for row in rows
+    ]
     return {
         "schema_version": "1.0",
         "generated_at": utc_now(),
@@ -1752,7 +1924,7 @@ def classify_new_local_papers(
             for row in rows[batch_start : batch_start + batch_size]:
                 match = match_by_path.get(row.get("path"))
                 status = match.get("match_status") if match else "new"
-                if status in {"exact_existing", "likely_existing", "error"}:
+                if status in {"exact_existing", "likely_existing", "local_duplicate", "error"}:
                     continue
                 if status == "possible_existing" and not include_possible_existing:
                     items.append(

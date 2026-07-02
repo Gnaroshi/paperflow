@@ -108,6 +108,39 @@ def test_match_zotero_exact_arxiv_excludes_import() -> None:
     assert match["reading_work_present_on_existing"] is True
 
 
+def test_match_zotero_exact_doi_excludes_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/paper.pdf",
+                "filename": "paper.pdf",
+                "scan_status": "ok",
+                "detected": {"doi": "HTTPS://doi.org/10.1109/CVPR52688.2022.01631", "title": "CV Paper", "year": 2022},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "CV Paper",
+                "normalized_title": "cv paper",
+                "year": 2022,
+                "doi_normalized": "10.1109/cvpr52688.2022.01631",
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "exact_existing"
+    assert match["match_reason"] == "same DOI"
+    assert match["safe_to_import"] is False
+
+
 def test_match_zotero_newer_arxiv_version_is_review_update_candidate() -> None:
     scan = {
         "files": [
@@ -140,6 +173,169 @@ def test_match_zotero_newer_arxiv_version_is_review_update_candidate() -> None:
     assert match["match_status"] == "update_candidate"
     assert match["safe_to_replace_existing_pdf"] is False
     assert match["unsafe_auto_replace"] is True
+    assert match["existing_version"] == 1
+    assert match["local_version"] == 2
+    assert match["suggested_action"] == "attach new version or replace linked PDF after review"
+
+
+def test_match_zotero_same_arxiv_base_same_family_excludes_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/2606.18208v1.pdf",
+                "filename": "2606.18208v1.pdf",
+                "scan_status": "ok",
+                "detected": {"arxiv_id": "2606.18208v1", "title": "Looped World Models", "year": 2026},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Looped World Models",
+                "normalized_title": "looped world models",
+                "year": 2026,
+                "arxiv_id": "2606.18208v2",
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "exact_existing"
+    assert match["match_reason"] == "same arXiv base ID"
+
+
+def test_match_zotero_attachment_hash_excludes_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/hash.pdf",
+                "filename": "hash.pdf",
+                "scan_status": "ok",
+                "sha256": "abc123",
+                "detected": {"title": "Hash Paper", "year": 2025},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Hash Paper",
+                "normalized_title": "hash paper",
+                "year": 2025,
+                "attachment_sha256": ["abc123"],
+                "attachment_paths": [],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "exact_existing"
+    assert match["match_reason"] == "same PDF SHA256"
+
+
+def test_match_zotero_resolved_attachment_path_excludes_import(tmp_path: Path) -> None:
+    pdf = _pdf(tmp_path / "paper.pdf")
+    scan = {
+        "files": [
+            {
+                "path": str(tmp_path / "subdir" / ".." / "paper.pdf"),
+                "filename": "paper.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Path Paper", "year": 2025},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Path Paper",
+                "normalized_title": "path paper",
+                "year": 2025,
+                "attachment_sha256": [],
+                "attachment_paths": [str(pdf)],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "exact_existing"
+    assert match["match_reason"] == "same resolved attachment local path"
+
+
+def test_match_zotero_title_year_first_author_excludes_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/title.pdf",
+                "filename": "title.pdf",
+                "scan_status": "ok",
+                "pdf_metadata_author": "Ada Lovelace",
+                "detected": {"title": "Exact Title Match", "year": 2025},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Exact Title Match",
+                "normalized_title": "exact title match",
+                "year": 2025,
+                "first_author": "lovelace",
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "exact_existing"
+    assert match["match_reason"] == "same normalized title, year, and first author"
+
+
+def test_fuzzy_title_without_ids_is_possible_existing_review() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/fuzzy.pdf",
+                "filename": "fuzzy.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Looped World Model", "year": 2026},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Looped World Models",
+                "normalized_title": "looped world models",
+                "year": 2026,
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": False,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "possible_existing"
+    assert match["safe_to_import"] is False
 
 
 def test_taxonomy_v3_battery_paper_does_not_become_rag() -> None:
@@ -270,6 +466,99 @@ def test_possible_existing_goes_to_review_queue_not_import() -> None:
     assert item["classification_action"] == "review"
     assert "AI Library/05 Review Queue/Possible Zotero Duplicate" in item["target_collections"]
     assert "cleanup/possible-existing" in item["normalized_tags"]
+
+
+def test_local_duplicate_by_doi_prefers_clearer_metadata() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/long/downloads/copy.pdf",
+                "filename": "copy.pdf",
+                "scan_status": "ok",
+                "size_bytes": 9000,
+                "modified_at": "2026-01-02T00:00:00+00:00",
+                "detected": {"doi": "10.1234/example", "title": None, "year": None, "abstract_present": False},
+            },
+            {
+                "path": "/tmp/paper.pdf",
+                "filename": "paper.pdf",
+                "scan_status": "ok",
+                "size_bytes": 1000,
+                "modified_at": "2026-01-01T00:00:00+00:00",
+                "first_page_abstract_candidate": "This paper has a clearer abstract.",
+                "detected": {
+                    "doi": "10.1234/example",
+                    "title": "Clear Metadata Paper",
+                    "year": 2025,
+                    "abstract_present": True,
+                },
+            },
+        ]
+    }
+
+    matches = match_local_to_zotero(scan, {"items": []})["matches"]
+    duplicate = next(row for row in matches if row["match_status"] == "local_duplicate")
+
+    assert duplicate["local_path"] == "/tmp/long/downloads/copy.pdf"
+    assert duplicate["canonical_local_path"] == "/tmp/paper.pdf"
+    assert duplicate["safe_to_import"] is False
+    assert "doi:10.1234/example" in duplicate["match_reason"]
+
+
+def test_local_duplicate_prefers_highest_arxiv_version_when_metadata_ties() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/2606.18208v1.pdf",
+                "filename": "2606.18208v1.pdf",
+                "scan_status": "ok",
+                "size_bytes": 1000,
+                "modified_at": "2026-01-03T00:00:00+00:00",
+                "detected": {"arxiv_id": "2606.18208v1", "title": "Looped World Models", "year": 2026, "abstract_present": True},
+            },
+            {
+                "path": "/tmp/2606.18208v2.pdf",
+                "filename": "2606.18208v2.pdf",
+                "scan_status": "ok",
+                "size_bytes": 1000,
+                "modified_at": "2026-01-01T00:00:00+00:00",
+                "detected": {"arxiv_id": "2606.18208v2", "title": "Looped World Models", "year": 2026, "abstract_present": True},
+            },
+        ]
+    }
+
+    matches = match_local_to_zotero(scan, {"items": []})["matches"]
+    duplicate = next(row for row in matches if row["match_status"] == "local_duplicate")
+
+    assert duplicate["local_path"] == "/tmp/2606.18208v1.pdf"
+    assert duplicate["canonical_local_path"] == "/tmp/2606.18208v2.pdf"
+    assert "arxiv_base:2606.18208" in duplicate["match_reason"]
+
+
+def test_local_duplicate_is_not_classified_for_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/2606.18208v1.pdf",
+                "filename": "2606.18208v1.pdf",
+                "scan_status": "ok",
+                "detected": {"arxiv_id": "2606.18208v1", "title": "Looped World Models", "year": 2026},
+            },
+            {
+                "path": "/tmp/2606.18208v2.pdf",
+                "filename": "2606.18208v2.pdf",
+                "scan_status": "ok",
+                "detected": {"arxiv_id": "2606.18208v2", "title": "Looped World Models", "year": 2026},
+            },
+        ]
+    }
+    matches = match_local_to_zotero(scan, {"items": []})
+
+    plan = classify_new_local_papers(scan, matches)
+
+    assert len(plan["items"]) == 1
+    assert plan["items"][0]["local_path"] == "/tmp/2606.18208v2.pdf"
+    assert plan["items"][0]["classification_action"] == "import"
 
 
 def test_local_plan_import_uses_area_year_and_linked_local(tmp_path: Path) -> None:
