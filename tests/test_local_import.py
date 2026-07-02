@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from paperflow.local_import import (
+    classify_new_local_papers,
+    classify_scan_row,
+    local_scan,
+    match_local_to_zotero,
+    plan_local_import,
+)
+
+
+def _pdf(path: Path, content: bytes = b"%PDF-1.4\nlocal import test\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def test_local_scan_skips_hidden_temp_zero_and_duplicate_hash(tmp_path: Path) -> None:
+    root = tmp_path / "papers"
+    first = _pdf(root / "2606.18208v1.pdf")
+    _pdf(root / "copy.pdf", first.read_bytes())
+    _pdf(root / ".hidden.pdf")
+    _pdf(root / "unfinished.pdf.crdownload")
+    _pdf(root / "zero.pdf", b"")
+
+    plan = local_scan(root, recursive=True, min_size_kb=0)
+
+    by_name = {Path(row["path"]).name: row for row in plan["files"]}
+    assert "2606.18208v1.pdf" in by_name
+    duplicate_pair = [by_name["2606.18208v1.pdf"], by_name["copy.pdf"]]
+    assert {row["scan_status"] for row in duplicate_pair} == {"ok", "skipped"}
+    assert any(row.get("detected", {}).get("arxiv_id") == "2606.18208v1" for row in duplicate_pair)
+    skipped = next(row for row in duplicate_pair if row["scan_status"] == "skipped")
+    assert "duplicate-file-hash" in skipped["errors"][0]
+    assert "zero.pdf" in by_name
+    assert ".hidden.pdf" not in by_name
+    assert "unfinished.pdf.crdownload" not in by_name
+
+
+def test_match_zotero_exact_arxiv_excludes_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/2606.18208v1.pdf",
+                "filename": "2606.18208v1.pdf",
+                "scan_status": "ok",
+                "sha256": "abc",
+                "detected": {"arxiv_id": "2606.18208v1", "doi": None, "title": "Looped World Models", "year": 2026},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Looped World Models",
+                "normalized_title": "looped world models",
+                "year": 2026,
+                "arxiv_id": "2606.18208v1",
+                "arxiv_base_id": "2606.18208",
+                "doi_normalized": None,
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": True,
+            }
+        ]
+    }
+
+    plan = match_local_to_zotero(scan, index)
+
+    match = plan["matches"][0]
+    assert match["match_status"] == "exact_existing"
+    assert match["safe_to_import"] is False
+    assert match["reading_work_present_on_existing"] is True
+
+
+def test_match_zotero_newer_arxiv_version_is_review_update_candidate() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/2606.18208v2.pdf",
+                "filename": "2606.18208v2.pdf",
+                "scan_status": "ok",
+                "detected": {"arxiv_id": "2606.18208v2", "title": "Looped World Models", "year": 2026},
+            }
+        ]
+    }
+    index = {
+        "items": [
+            {
+                "item_key": "ITEM1",
+                "title": "Looped World Models",
+                "normalized_title": "looped world models",
+                "year": 2026,
+                "arxiv_id": "2606.18208v1",
+                "arxiv_base_id": "2606.18208",
+                "attachment_sha256": [],
+                "attachment_paths": [],
+                "reading_work_present": True,
+            }
+        ]
+    }
+
+    match = match_local_to_zotero(scan, index)["matches"][0]
+
+    assert match["match_status"] == "update_candidate"
+    assert match["safe_to_replace_existing_pdf"] is False
+    assert match["unsafe_auto_replace"] is True
+
+
+def test_taxonomy_v3_battery_paper_does_not_become_rag() -> None:
+    row = {
+        "filename": "battery_soh_prediction.pdf",
+        "detected": {"title": "Battery State of Health and RUL Prediction", "arxiv_id": None},
+        "first_pages_text": "battery degradation state of health SOH RUL cycle life prediction",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert "AI Library/20 Areas/Battery ML/SOH & RUL Prognostics" in classification["target_collections"]
+    assert "AI Library/20 Areas/LLM/RAG & Retrieval" not in classification["target_collections"]
+
+
+def test_taxonomy_v3_explicit_rag_only_when_retrieval_present() -> None:
+    row = {
+        "filename": "retrieval_augmented_generation.pdf",
+        "detected": {"title": "Retrieval-Augmented Generation with Dense Retrieval", "arxiv_id": None},
+        "first_pages_text": "retrieval augmented generation retriever passage retrieval query-document retrieval",
+    }
+
+    classification = classify_scan_row(row)
+
+    assert "AI Library/20 Areas/LLM/RAG & Retrieval" in classification["target_collections"]
+
+
+def test_possible_existing_goes_to_review_queue_not_import() -> None:
+    scan = {
+        "files": [
+            {
+                "path": "/tmp/paper.pdf",
+                "filename": "paper.pdf",
+                "scan_status": "ok",
+                "detected": {"title": "Ambiguous Paper", "year": 2025},
+            }
+        ]
+    }
+    matches = {
+        "matches": [
+            {
+                "local_path": "/tmp/paper.pdf",
+                "match_status": "possible_existing",
+                "matched_zotero_item_key": "ITEM1",
+            }
+        ]
+    }
+
+    plan = classify_new_local_papers(scan, matches)
+    item = plan["items"][0]
+
+    assert item["classification_action"] == "review"
+    assert "AI Library/05 Review Queue" in item["target_collections"]
+    assert "cleanup/possible-existing" in item["normalized_tags"]
+
+
+def test_local_plan_import_uses_area_year_and_linked_local(tmp_path: Path) -> None:
+    source = _pdf(tmp_path / "paper.pdf")
+    classification = {
+        "items": [
+            {
+                "classification_action": "import",
+                "local_path": str(source),
+                "title": "Battery State of Health Prediction",
+                "year": 2025,
+                "doi": None,
+                "arxiv_id": "2501.12345v1",
+                "sha256": "abcdef123456",
+                "sha256_first_1mb": "abcdef123456",
+                "abstract_present": True,
+                "target_collections": ["AI Library/20 Areas/Battery ML/SOH & RUL Prognostics"],
+                "normalized_tags": ["status/to-read", "area/battery-ml", "type/method"],
+                "confidence": 0.8,
+                "rationale": "battery prognostics signal",
+                "gemini_used": False,
+            }
+        ]
+    }
+
+    plan = plan_local_import(classification, vault_library=tmp_path / "Library")
+    item = plan["items"][0]
+
+    assert plan["mode"] == "dry-run"
+    assert plan["upload_to_zotero_storage"] is False
+    assert "/Battery ML - SOH & RUL Prognostics/2025/" in item["planned_vault_path"]
+    assert item["planned_filename"].endswith("[arXiv 2501.12345v1].pdf")
+    assert "paperflow/source-local-import" in item["planned_tags"]

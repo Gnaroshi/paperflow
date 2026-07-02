@@ -68,6 +68,29 @@ from paperflow.ingest import (
     validate_ingest_request,
     write_ingest_report,
 )
+from paperflow.local_import import (
+    LOCAL_IMPORT_CONFIRMATION,
+    SOURCE_QUARANTINE_CONFIRMATION,
+    apply_local_import_plan,
+    audit_local_import,
+    build_zotero_index,
+    cleanup_source_files,
+    classify_new_local_papers,
+    local_scan,
+    match_local_to_zotero,
+    plan_local_import,
+    validate_local_apply,
+    validate_source_cleanup,
+    write_classification_report,
+    write_import_plan_report,
+    write_local_apply_markdown,
+    write_local_audit_report,
+    write_local_scan_report,
+    write_match_report,
+    write_source_cleanup_report,
+    write_zotero_index_report,
+    timestamped_path,
+)
 from paperflow.metadata import enrich_metadata_file
 from paperflow.migration import default_dedupe_input, default_items_input, plan_migration_file
 from paperflow.migration_apply import (
@@ -120,10 +143,12 @@ console = Console()
 app = typer.Typer(help="Safe Zotero AI paper organization planning.")
 zotero_app = typer.Typer(help="Zotero scan, plan, report, and apply commands.")
 vault_app = typer.Typer(help="Local-first PDF vault commands.")
+local_app = typer.Typer(help="Local recursive paper import commands.")
 credentials_app = typer.Typer(help="Credential verification commands.")
 cleanup_app = typer.Typer(help="Cleanup workbench commands.")
 app.add_typer(zotero_app, name="zotero")
 app.add_typer(vault_app, name="vault")
+app.add_typer(local_app, name="local")
 app.add_typer(credentials_app, name="credentials")
 app.add_typer(cleanup_app, name="cleanup")
 
@@ -649,6 +674,200 @@ def cleanup_plan_duplicates(
     dump_json_data(output_path, plan)
     write_duplicate_resolution_report(plan, report_path)
     console.print(f"Wrote duplicate resolution plan to {output_path}; no writes executed.")
+
+
+def _read_json_or_exit(path: Path, label: str) -> dict:
+    if not path.exists():
+        console.print(f"[bold red]{label} not found: {path}[/bold red]")
+        raise typer.Exit(2)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[bold red]Could not read {label}: {exc}[/bold red]")
+        raise typer.Exit(2)
+
+
+@local_app.command("scan")
+def local_scan_command(
+    root_path: Path = typer.Argument(..., help="Local root folder or PDF file to scan."),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Walk folders recursively."),
+    include_hidden: bool = typer.Option(False, "--include-hidden", help="Include hidden files/folders."),
+    max_depth: int | None = typer.Option(None, "--max-depth", help="Maximum recursive depth."),
+    follow_symlinks: bool = typer.Option(False, "--follow-symlinks/--no-follow-symlinks", help="Follow symlinks while walking."),
+    exclude_glob: list[str] | None = typer.Option(None, "--exclude-glob", help="Glob pattern to exclude; repeatable."),
+    include_glob: list[str] | None = typer.Option(None, "--include-glob", help="Glob pattern to include; repeatable."),
+    min_size_kb: int = typer.Option(1, "--min-size-kb", help="Skip PDFs smaller than this size."),
+    max_size_mb: int | None = typer.Option(None, "--max-size-mb", help="Skip PDFs larger than this size."),
+    output_path: Path = typer.Option(Path("data/local_scan.json"), "--output", "-o", help="JSON output."),
+    report_path: Path = typer.Option(Path("data/local_scan_report.md"), "--report", help="Markdown report output."),
+    csv_output: Path = typer.Option(Path("data/local_scan.csv"), "--csv-output", help="CSV report output."),
+    progress_jsonl: bool = typer.Option(False, "--progress-jsonl", help="Emit progress JSONL."),
+    verbose: bool = typer.Option(False, "--verbose", help="Emit extra scan warnings."),
+) -> None:
+    """Recursively scan local PDFs without modifying Zotero or files."""
+
+    plan = local_scan(
+        root_path=root_path,
+        recursive=recursive,
+        include_hidden=include_hidden,
+        max_depth=max_depth,
+        follow_symlinks=follow_symlinks,
+        exclude_glob=exclude_glob or [],
+        include_glob=include_glob or [],
+        min_size_kb=min_size_kb,
+        max_size_mb=max_size_mb,
+        progress_jsonl=progress_jsonl,
+        verbose=verbose,
+    )
+    dump_json_data(output_path, plan)
+    write_local_scan_report(plan, report_path, csv_output)
+    console.print(f"Scanned {len(plan['files'])} local PDF rows to {output_path}.")
+
+
+@local_app.command("index-zotero")
+def local_index_zotero_command(
+    output_path: Path = typer.Option(Path("data/zotero_index.json"), "--output", "-o", help="JSON index output."),
+    report_path: Path = typer.Option(Path("data/zotero_index_report.md"), "--report", help="Markdown report output."),
+    base_url: str = typer.Option(DEFAULT_LOCAL_API_BASE_URL, "--base-url", help="Zotero Local API base URL."),
+    library_prefix: str = typer.Option(DEFAULT_LIBRARY_PREFIX, "--library-prefix", help="Local API library prefix."),
+    web_base_url: str = typer.Option("https://api.zotero.org", "--web-base-url", help="Zotero Web API base URL."),
+    fallback_jsonl: Path = typer.Option(Path("data/zotero_items_enriched.jsonl"), "--fallback-jsonl", help="Fallback enriched item JSONL."),
+) -> None:
+    """Index existing Zotero items for local duplicate/existence detection."""
+
+    try:
+        index = build_zotero_index(
+            local_base_url=base_url,
+            library_prefix=library_prefix,
+            web_base_url=web_base_url,
+            fallback_jsonl=fallback_jsonl,
+        )
+    except LocalAPIUnavailable:
+        console.print(f"[bold red]{LOCAL_API_SETUP_MESSAGE}[/bold red]")
+        raise typer.Exit(2)
+    dump_json_data(output_path, index)
+    write_zotero_index_report(index, report_path)
+    console.print(f"Indexed {len(index['items'])} Zotero parent items to {output_path}.")
+
+
+@local_app.command("match-zotero")
+def local_match_zotero_command(
+    scan_path: Path = typer.Option(Path("data/local_scan.json"), "--scan", help="Local scan JSON input."),
+    index_path: Path = typer.Option(Path("data/zotero_index.json"), "--index", help="Zotero index JSON input."),
+    output_path: Path = typer.Option(Path("data/local_zotero_match_plan.json"), "--output", "-o", help="Match plan JSON output."),
+    report_path: Path = typer.Option(Path("data/local_zotero_match_report.md"), "--report", help="Markdown report output."),
+) -> None:
+    """Determine which local PDFs already exist in Zotero."""
+
+    scan = _read_json_or_exit(scan_path, "local scan JSON")
+    index = _read_json_or_exit(index_path, "Zotero index JSON")
+    plan = match_local_to_zotero(scan, index)
+    dump_json_data(output_path, plan)
+    write_match_report(plan, report_path)
+    console.print(f"Wrote local/Zotero match plan to {output_path}.")
+
+
+@local_app.command("classify-new")
+def local_classify_new_command(
+    scan_path: Path = typer.Option(Path("data/local_scan.json"), "--scan", help="Local scan JSON input."),
+    match_path: Path = typer.Option(Path("data/local_zotero_match_plan.json"), "--matches", help="Local/Zotero match plan input."),
+    output_path: Path = typer.Option(Path("data/local_classification_plan.json"), "--output", "-o", help="Classification plan JSON output."),
+    report_path: Path = typer.Option(Path("data/local_classification_report.md"), "--report", help="Markdown report output."),
+    csv_output: Path = typer.Option(Path("data/local_classification.csv"), "--csv-output", help="CSV report output."),
+    include_possible_existing: bool = typer.Option(False, "--include-possible-existing", help="Classify possible matches for review/import."),
+    include_update_candidates: bool = typer.Option(False, "--include-update-candidates", help="Classify newer arXiv/update candidates."),
+) -> None:
+    """Classify only local PDFs that are not already in Zotero by default."""
+
+    scan = _read_json_or_exit(scan_path, "local scan JSON")
+    matches = _read_json_or_exit(match_path, "local/Zotero match JSON")
+    plan = classify_new_local_papers(
+        scan,
+        matches,
+        include_possible_existing=include_possible_existing,
+        include_update_candidates=include_update_candidates,
+    )
+    dump_json_data(output_path, plan)
+    write_classification_report(plan, report_path, csv_output)
+    console.print(f"Wrote local classification plan to {output_path}.")
+
+
+@local_app.command("plan-import")
+def local_plan_import_command(
+    classification_path: Path = typer.Option(Path("data/local_classification_plan.json"), "--classification", help="Classification plan input."),
+    output_path: Path = typer.Option(Path("data/local_import_plan.json"), "--output", "-o", help="Import plan JSON output."),
+    report_path: Path = typer.Option(Path("data/local_import_report.md"), "--report", help="Markdown report output."),
+    vault_library: Path = typer.Option(DEFAULT_VAULT_LIBRARY, "--vault-library", help="Local vault library path."),
+) -> None:
+    """Plan vault copy/rename and Zotero linked attachment creation."""
+
+    classification = _read_json_or_exit(classification_path, "local classification JSON")
+    plan = plan_local_import(classification, vault_library=vault_library)
+    dump_json_data(output_path, plan)
+    write_import_plan_report(plan, report_path)
+    console.print(f"Planned {len(plan['items'])} local imports to {output_path}. No writes executed.")
+
+
+@local_app.command("apply-import")
+def local_apply_import_command(
+    input_path: Path = typer.Option(Path("data/local_import_plan.json"), "--input", "-i", help="Local import plan input."),
+    apply: bool = typer.Option(False, "--apply", help="Required for copying/writing."),
+    confirm: str | None = typer.Option(None, "--confirm", help=f'Required confirmation: "{LOCAL_IMPORT_CONFIRMATION}"'),
+    web_base_url: str = typer.Option("https://api.zotero.org", "--web-base-url", help="Zotero Web API base URL."),
+) -> None:
+    """Apply local import as linked-local Zotero attachments."""
+
+    user_id = os.environ.get("ZOTERO_USER_ID")
+    api_key = os.environ.get("ZOTERO_API_KEY")
+    try:
+        validate_local_apply(apply=apply, confirm=confirm, user_id=user_id, api_key=api_key)
+    except ValueError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(2)
+    plan = _read_json_or_exit(input_path, "local import plan JSON")
+    log = apply_local_import_plan(plan, user_id=user_id or "", api_key=api_key or "", web_base_url=web_base_url)
+    json_log = timestamped_path("local_import_apply_log", data_dir=input_path.parent)
+    md_log = json_log.with_suffix(".md")
+    dump_json_data(json_log, log)
+    write_local_apply_markdown(log, md_log)
+    console.print(f"Applied local import. Logs: {json_log}, {md_log}.")
+
+
+@local_app.command("audit-import")
+def local_audit_import_command(
+    plan_path: Path = typer.Option(Path("data/local_import_plan.json"), "--plan", help="Local import plan input."),
+    apply_log_path: Path | None = typer.Option(None, "--apply-log", help="Apply log input; defaults to latest."),
+    json_output: Path = typer.Option(Path("data/local_import_audit.json"), "--json-output", help="Audit JSON output."),
+    markdown_output: Path = typer.Option(Path("data/local_import_audit.md"), "--markdown-output", help="Audit Markdown output."),
+) -> None:
+    """Verify local import results."""
+
+    audit = audit_local_import(plan_path=plan_path, apply_log_path=apply_log_path, data_dir=json_output.parent)
+    dump_json_data(json_output, audit)
+    write_local_audit_report(audit, markdown_output)
+    console.print(f"Wrote local import audit to {json_output} and {markdown_output}.")
+
+
+@local_app.command("cleanup-source-files")
+def local_cleanup_source_files_command(
+    audit_path: Path = typer.Option(Path("data/local_import_audit.json"), "--audit", help="Import audit JSON input."),
+    output_path: Path = typer.Option(Path("data/local_source_cleanup_report.json"), "--output", "-o", help="Cleanup JSON output."),
+    markdown_output: Path = typer.Option(Path("data/local_source_cleanup_report.md"), "--markdown-output", help="Cleanup Markdown output."),
+    apply: bool = typer.Option(False, "--apply", help="Move sources to quarantine."),
+    confirm: str | None = typer.Option(None, "--confirm", help=f'Required confirmation: "{SOURCE_QUARANTINE_CONFIRMATION}"'),
+) -> None:
+    """Report or move imported source PDFs to quarantine. Never permanently deletes."""
+
+    audit = _read_json_or_exit(audit_path, "local import audit JSON")
+    try:
+        validate_source_cleanup(apply=apply, confirm=confirm, audit=audit)
+    except ValueError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(2)
+    report = cleanup_source_files(audit, apply=apply)
+    dump_json_data(output_path, report)
+    write_source_cleanup_report(report, markdown_output)
+    console.print(f"Wrote local source cleanup report to {output_path}.")
 
 
 def _items_to_csv(items: list[ZoteroItem], output_path: Path) -> None:
