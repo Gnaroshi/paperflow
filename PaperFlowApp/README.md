@@ -31,13 +31,38 @@ swift build -c release
 open dist/PaperFlow.app
 ```
 
-This project is a Swift Package that bundles into a small `.app` for local
-development. Developer ID signing and notarization can be added later without
-blocking local builds.
+`build_app.sh` creates:
+
+- `dist/PaperFlow.app`
+- `dist/PaperFlow.zip`
+
+For local Spotlight launch, install the app into `/Applications`:
+
+```bash
+./install_app.sh
+```
+
+Then press `Command-Space`, type `PaperFlow`, and press Return.
+
+For GitHub download distribution, upload `dist/PaperFlow.zip` to a release. If
+Developer ID signing credentials are available:
+
+```bash
+DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" ./build_app.sh
+```
+
+For notarization:
+
+```bash
+DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" \
+NOTARY_PROFILE="paperflow-notary" \
+./build_app.sh
+```
 
 ## Set Up
 
-Open PaperFlow from `dist/PaperFlow.app`. The menu bar item is only for
+Open PaperFlow from Spotlight after running `./install_app.sh`, or directly
+from `dist/PaperFlow.app` during development. The menu bar item is only for
 status/settings/actions; it is not the PDF drop surface. Use Settings for:
 
 - `PaperFlow project directory`: the folder containing `pyproject.toml`
@@ -173,5 +198,7 @@ Secrets are redacted from displayed and saved command output.
 - If PDFs are consuming Zotero Storage, check Zotero file sync settings.
 - If drag-and-drop paths cannot be read, move files into a user-owned folder
   such as Downloads, Documents, or the PaperFlow vault.
-- If launch at login fails, add `dist/PaperFlow.app` manually in macOS System
-  Settings.
+- If Spotlight cannot find PaperFlow immediately after install, wait a few
+  seconds for Spotlight indexing, or run `./install_app.sh` again.
+- If launch at login fails, add `/Applications/PaperFlow.app` manually in macOS
+  System Settings.

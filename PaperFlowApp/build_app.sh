@@ -27,10 +27,13 @@ else
   echo "Ad-hoc signed $APP_DIR. Set DEVELOPER_ID_APPLICATION='Developer ID Application: ...' for distribution signing."
 fi
 
+COPYFILE_DISABLE=1 ditto --norsrc --noextattr -c -k --keepParent "$APP_DIR" "$SCRIPT_DIR/dist/PaperFlow.zip"
+echo "Packaged $SCRIPT_DIR/dist/PaperFlow.zip"
+
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-  ditto -c -k --keepParent "$APP_DIR" "$SCRIPT_DIR/dist/PaperFlow.zip"
   xcrun notarytool submit "$SCRIPT_DIR/dist/PaperFlow.zip" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$APP_DIR"
+  COPYFILE_DISABLE=1 ditto --norsrc --noextattr -c -k --keepParent "$APP_DIR" "$SCRIPT_DIR/dist/PaperFlow.zip"
   echo "Notarized and stapled $APP_DIR"
 fi
 

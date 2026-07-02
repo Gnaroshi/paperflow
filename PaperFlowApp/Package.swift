@@ -19,6 +19,7 @@ let package = Package(
                 "Info.plist",
                 "PaperFlow.entitlements",
                 "build_app.sh",
+                "install_app.sh",
                 "dist"
             ],
             sources: [
