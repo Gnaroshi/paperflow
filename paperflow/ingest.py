@@ -1061,7 +1061,6 @@ def linked_attachment_body(
         "linkMode": "linked_file",
         "title": title or pdf_path.name,
         "path": zotero_linked_attachment_path(pdf_path, vault_library=vault_library),
-        "filename": pdf_path.name,
         "contentType": "application/pdf",
     }
 

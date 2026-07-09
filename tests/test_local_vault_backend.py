@@ -78,6 +78,7 @@ def test_linked_attachment_body_does_not_upload_file() -> None:
 
     assert body["linkMode"] == "linked_file"
     assert body["path"] == "/vault/2025/paper.pdf"
+    assert "filename" not in body
     assert "file" not in body
 
 
