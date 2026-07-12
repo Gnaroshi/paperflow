@@ -4,6 +4,7 @@ import json
 import os
 import hashlib
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -17,6 +18,51 @@ from paperflow import __version__
 INTEGRATION_SCHEMA_VERSION = 1
 INTEGRATION_CONTRACT_VERSION = 1
 PROVIDER_ID = "paperflow"
+
+
+def build_provenance() -> dict[str, Any]:
+    """Return path-free Git provenance for source and packaged builds."""
+
+    commit = os.environ.get("PAPERFLOW_BUILD_COMMIT")
+    count = os.environ.get("PAPERFLOW_BUILD_NUMBER")
+    dirty: bool | None = None
+    root = Path(__file__).resolve().parents[1]
+    if not commit and (root / ".git").exists():
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ).stdout.strip()
+            count = subprocess.run(
+                ["git", "rev-list", "--count", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            ).stdout.strip()
+            dirty = bool(
+                subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                ).stdout.strip()
+            )
+        except (OSError, subprocess.SubprocessError):
+            commit = None
+            count = None
+    return {
+        "commit": commit if commit and re.fullmatch(r"[0-9a-f]{40}", commit) else None,
+        "number": int(count) if count and count.isdigit() else None,
+        "dirty": dirty,
+    }
 
 
 class ProviderInfo(BaseModel):
@@ -126,6 +172,33 @@ def status_data(data_dir: Path = Path("data")) -> dict[str, Any]:
             "defaultMode": "dry-run",
         },
     }
+
+
+def recent_activity_data(data_dir: Path = Path("data"), *, limit: int = 5) -> dict[str, Any]:
+    if not 1 <= limit <= 20:
+        raise ValueError("Recent activity limit must be between 1 and 20")
+    candidates = [
+        ("zotero-scan", "Zotero scan available", data_dir / "zotero_items.jsonl"),
+        ("organization-plan", "Organization plan ready for review", data_dir / "organize_plan.json"),
+        ("ingest-plan", "Import plan ready for review", data_dir / "ingest_plan.json"),
+    ]
+    activities: list[dict[str, Any]] = []
+    for kind, summary, path in candidates:
+        if not path.is_file():
+            continue
+        occurred_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+        activities.append(
+            {
+                "id": f"paperflow:{kind}:{int(path.stat().st_mtime)}",
+                "type": "next-action",
+                "summary": summary,
+                "occurredAt": occurred_at,
+                "resourceId": kind,
+                "actionable": kind != "zotero-scan",
+            }
+        )
+    activities.sort(key=lambda item: item["occurredAt"], reverse=True)
+    return {"activities": activities[:limit], "activityCount": min(len(activities), limit)}
 
 
 def doctor_data(*, local_api_available: bool) -> tuple[str, dict[str, Any], list[str]]:

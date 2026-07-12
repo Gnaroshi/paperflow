@@ -73,11 +73,13 @@ from paperflow.integration import (
     IntegrationError,
     MetadataCandidate,
     artifact_name,
+    build_provenance,
     doctor_data,
     emit_json,
     emit_json_failure,
     integration_envelope,
     planned_handoff_changes,
+    recent_activity_data,
     stable_source_id,
     status_data,
     validate_arxiv_id,
@@ -209,7 +211,7 @@ def version_command(
         emit_json(
             integration_envelope(
                 "version",
-                data={"version": __version__, "contractVersion": 1},
+                data={"version": __version__, "contractVersion": 1, "build": build_provenance()},
             )
         )
         return
@@ -228,6 +230,25 @@ def status_command(
         return
     console.print("PaperFlow is available.")
     console.print("Zotero scanning is read-only; writes require an explicit apply command.")
+
+
+@app.command("recent")
+def recent_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+    limit: int = typer.Option(5, "--limit", min=1, max=20),
+    data_dir: Path = typer.Option(Path("data"), "--data-dir", hidden=True),
+) -> None:
+    """Show bounded, non-sensitive recent PaperFlow activity."""
+
+    data = recent_activity_data(data_dir, limit=limit)
+    if json_mode:
+        emit_json(integration_envelope("recent-activity", data=data))
+        return
+    if not data["activities"]:
+        console.print("No recent PaperFlow plans or scans are available.")
+        return
+    for activity in data["activities"]:
+        console.print(f"{activity['occurredAt']}  {activity['summary']}")
 
 
 @app.command("doctor")

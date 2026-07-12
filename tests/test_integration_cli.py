@@ -25,6 +25,14 @@ def test_manifest_declares_real_provider_entrypoints_without_private_values() ->
     assert manifest["entrypoints"]["cli"]["versionSubcommand"] == ["version", "--json"]
     assert manifest["entrypoints"]["cli"]["statusSubcommand"] == ["status", "--json"]
     assert manifest["entrypoints"]["cli"]["healthSubcommand"] == ["doctor", "--json"]
+    assert manifest["entrypoints"]["cli"]["recentActivitySubcommand"] == [
+        "recent",
+        "--json",
+        "--limit",
+        "5",
+    ]
+    assert manifest["health"]["contractVersion"] == 1
+    assert manifest["distribution"]["source"]["mode"] == "git-fetch"
     serialized = json.dumps(manifest)
     assert "/Users/" not in serialized
     assert "token" not in serialized.lower()
@@ -39,13 +47,34 @@ def test_version_and_status_are_single_versioned_json_values() -> None:
     assert version["schemaVersion"] == 1
     assert version["provider"] == {
         "id": "paperflow",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "contractVersion": 1,
     }
     assert status["capability"] == "status"
     assert status["data"]["safety"]["zoteroSqlite"] == "never-edited"
     assert status["data"]["safety"]["writeBoundary"] == "explicit-apply"
     assert "/Users/" not in status_result.stdout
+
+
+def test_recent_activity_is_bounded_path_free_and_does_not_modify_artifacts(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    scan = data / "zotero_items.jsonl"
+    plan = data / "organize_plan.json"
+    scan.write_text("{}\n", encoding="utf-8")
+    plan.write_text("{}\n", encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in (scan, plan)}
+
+    result, payload = _json_result(
+        ["recent", "--json", "--limit", "1", "--data-dir", str(data)]
+    )
+
+    assert result.exit_code == 0
+    assert payload["capability"] == "recent-activity"
+    assert payload["data"]["activityCount"] == 1
+    assert len(payload["data"]["activities"]) == 1
+    assert str(tmp_path) not in result.stdout
+    assert {path.name: path.read_bytes() for path in (scan, plan)} == before
 
 
 def test_doctor_json_reports_read_only_health_and_nonzero_blocker(monkeypatch) -> None:

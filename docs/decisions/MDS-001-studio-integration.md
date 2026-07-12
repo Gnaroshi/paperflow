@@ -96,7 +96,7 @@ For a PDF, PaperFlow may plan a copy into the managed vault and a linked-local Z
 ## Compatibility and migration
 
 - Manifest schema 1 and integration contract 1 require Studio `>=0.1.0`.
-- CLI provider version is `0.1.0`; the native app bundle reports `0.1.2`.
+- CLI provider and native bundle version are `0.2.0`. Version JSON and the app bundle also carry Git commit/build provenance; the release tag must match the semantic version.
 - Provider adoption is additive. PaperFlow remains usable without Studio, and Studio degrades when PaperFlow is missing, blocked, malformed, timed out, or incompatible.
 - Merge the PaperFlow provider contract before enabling the Studio adapter in a release. Mixed versions must show setup/incompatible rather than infer availability.
 - No data migration, backfill, database change, or shared state is introduced.
@@ -106,7 +106,7 @@ For a PDF, PaperFlow may plan a copy into the managed vault and a linked-local Z
 - Baseline fixture: CLI inventory, native sections, confirmations, output artifacts, bundle ID, and safety promises.
 - JSON contract: manifest values, version/status, health success/blocker, Local API scan, organization planning, redacted errors, non-zero exits, and unchanged human output.
 - Handoff: all four source types; accepted, duplicate, needs-review, rejected; exact-one input; dry-run requirement; invalid source; path/content redaction; no executed planned change.
-- Full Python suite: 121 tests pass.
+- Full Python suite: 122 tests pass.
 - Python bytecode compilation passes.
 - Swift package builds successfully. The baseline has no Swift test target, so `swift test` builds and then reports `no tests found`; no Swift source changes are made by this integration.
 
