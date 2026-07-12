@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "paperflow",
+  "applicationVersion": "0.1.0",
+  "sourceCommit": "056e6251dc07cc74f39c1df7ed2060481e623083",
+  "scenarioId": "zotero-readonly-plan-boundary",
+  "usesDemoData": true,
+  "captureDate": "2026-07-13",
+  "captureCommand": "cd PaperFlowApp && GNAROSHI_SHOWCASE=1 swift run PaperFlowApp --showcase",
+  "sourceFiles": ["PaperFlowApp/ShowcaseMode.swift", "PaperFlowApp/ShowcaseView.swift"],
+  "privacyReviewed": true,
+  "screenshots": [
+    { "id": "scan-summary", "file": "screenshots/scan-summary.png", "width": 1120, "height": 904, "stepId": "scan-summary", "locale": "en", "theme": "dark", "alt": "PaperFlow read-only scan summary for a deterministic example Zotero library with zero writes." },
+    { "id": "plan-review", "file": "screenshots/plan-review.png", "width": 1120, "height": 904, "stepId": "plan-review", "locale": "en", "theme": "dark", "alt": "PaperFlow organization plan showing proposed example collection moves and duplicate review." },
+    { "id": "apply-boundary", "file": "screenshots/apply-boundary.png", "width": 1120, "height": 904, "stepId": "apply-boundary", "locale": "en", "theme": "dark", "alt": "PaperFlow explicit apply boundary disabled in showcase mode before any Zotero write." },
+    { "id": "scan-summary-light", "file": "screenshots/scan-summary-light.png", "width": 1120, "height": 904, "stepId": "scan-summary", "locale": "en", "theme": "light", "alt": "Light theme verification of the PaperFlow example library scan summary." }
+  ]
+}
