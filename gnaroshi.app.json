@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "paperflow",
+  "displayName": "PaperFlow",
+  "repository": "Gnaroshi/paperflow",
+  "version": "0.1.0",
+  "platforms": ["macos"],
+  "kind": "application",
+  "bundleId": "com.paperflow.app",
+  "dataOwner": "paperflow",
+  "capabilities": [
+    "scan-library",
+    "plan-organization",
+    "import-paper",
+    "open-paper",
+    "open-plan"
+  ],
+  "entrypoints": {
+    "app": {
+      "bundleId": "com.paperflow.app",
+      "displayName": "PaperFlow",
+      "version": "0.1.2",
+      "discovery": "bundle-id"
+    },
+    "cli": {
+      "executable": "paperflow",
+      "versionSubcommand": ["version", "--json"],
+      "statusSubcommand": ["status", "--json"],
+      "healthSubcommand": ["doctor", "--json"]
+    },
+    "localHttp": {},
+    "deepLinks": []
+  },
+  "health": {
+    "timeoutMs": 3000
+  },
+  "icon": {
+    "kind": "none"
+  },
+  "privacy": {
+    "classification": "private-summary",
+    "credentials": "provider-owned",
+    "localPaths": "redacted"
+  },
+  "integration": {
+    "contractVersion": 1,
+    "minimumStudioVersion": "0.1.0",
+    "purpose": "Organize Zotero-linked papers through reviewed, recoverable plans.",
+    "readOnly": true
+  }
+}

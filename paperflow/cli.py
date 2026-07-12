@@ -68,6 +68,16 @@ from paperflow.ingest import (
     validate_ingest_request,
     write_ingest_report,
 )
+from paperflow import __version__
+from paperflow.integration import (
+    IntegrationError,
+    artifact_name,
+    doctor_data,
+    emit_json,
+    emit_json_failure,
+    integration_envelope,
+    status_data,
+)
 from paperflow.local_import import (
     LOCAL_IMPORT_CONFIRMATION,
     SOURCE_QUARANTINE_CONFIRMATION,
@@ -182,6 +192,87 @@ app.add_typer(taxonomy_app, name="taxonomy")
 class ApplyModeOption(StrEnum):
     ADD_ONLY = "add-only"
     REPLACE_COLLECTIONS = "replace-collections"
+
+
+@app.command("version")
+def version_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+) -> None:
+    """Show the PaperFlow CLI and integration contract versions."""
+
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "version",
+                data={"version": __version__, "contractVersion": 1},
+            )
+        )
+        return
+    console.print(f"paperflow {__version__}")
+
+
+@app.command("status")
+def status_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+) -> None:
+    """Show non-sensitive integration availability and artifact status."""
+
+    data = status_data()
+    if json_mode:
+        emit_json(integration_envelope("status", data=data))
+        return
+    console.print("PaperFlow is available.")
+    console.print("Zotero scanning is read-only; writes require an explicit apply command.")
+
+
+@app.command("doctor")
+def doctor_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+    base_url: str = typer.Option(
+        DEFAULT_LOCAL_API_BASE_URL,
+        "--base-url",
+        help="Zotero Local API base URL.",
+    ),
+    library_prefix: str = typer.Option(
+        DEFAULT_LIBRARY_PREFIX,
+        "--library-prefix",
+        help="Local API library prefix, usually /users/0.",
+    ),
+) -> None:
+    """Check read-only prerequisites without exposing credentials or paths."""
+
+    try:
+        with ZoteroLocalClient(base_url=base_url, library_prefix=library_prefix) as client:
+            local_api_available = client.health_check()
+    except (LocalAPIUnavailable, ValueError):
+        local_api_available = False
+
+    state, data, warnings = doctor_data(local_api_available=local_api_available)
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "health",
+                status="ok" if state == "ok" else "blocked",
+                data=data,
+                warnings=warnings,
+                errors=[] if state == "ok" else [
+                    IntegrationError(
+                        code="zotero-local-api-unavailable",
+                        message="Zotero Local API is unavailable.",
+                    )
+                ],
+            )
+        )
+        if state != "ok":
+            typer.echo("PaperFlow health check blocked: zotero-local-api-unavailable", err=True)
+            raise typer.Exit(2)
+        return
+
+    if local_api_available:
+        console.print("[bold green]Zotero Local API is available.[/bold green]")
+        return
+    console.print(f"[bold red]{LOCAL_API_SETUP_MESSAGE}[/bold red]")
+    raise typer.Exit(2)
 
 
 def parse_bool_value(value: bool | str) -> bool:
@@ -1195,6 +1286,11 @@ def scan(
         "--library-prefix",
         help="Local API library prefix, usually /users/0.",
     ),
+    json_mode: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit one versioned JSON result on stdout.",
+    ),
 ) -> None:
     """Read regular parent items from the Zotero Local API."""
 
@@ -1202,11 +1298,34 @@ def scan(
         with ZoteroLocalClient(base_url=base_url, library_prefix=library_prefix) as client:
             items = client.scan_items()
     except LocalAPIUnavailable:
+        if json_mode:
+            emit_json_failure(
+                "scan-library",
+                code="zotero-local-api-unavailable",
+                message="Zotero Local API is unavailable.",
+                status="unavailable",
+            )
         console.print(f"[bold red]{LOCAL_API_SETUP_MESSAGE}[/bold red]")
         raise typer.Exit(2)
 
     write_jsonl(jsonl_output, items)
     _items_to_csv(items, csv_output)
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "scan-library",
+                data={
+                    "itemCount": len(items),
+                    "source": "zotero-local-api-read-only",
+                    "artifacts": [
+                        {"kind": "zotero-items-jsonl", "name": artifact_name(jsonl_output)},
+                        {"kind": "zotero-items-csv", "name": artifact_name(csv_output)},
+                    ],
+                    "writesExecuted": False,
+                },
+            )
+        )
+        return
     console.print(
         f"Scanned {len(items)} regular Zotero items to {jsonl_output} and {csv_output}."
     )
@@ -1231,10 +1350,40 @@ def plan_organize(
         "--pdf-snippets",
         help="Use first-page PDF snippets when local paths are available.",
     ),
+    json_mode: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit one versioned JSON result on stdout.",
+    ),
 ) -> None:
     """Build a side-effect-free organization plan."""
 
-    plan = plan_from_jsonl(input_path, output_path, use_pdf_snippets=pdf_snippets)
+    try:
+        plan = plan_from_jsonl(input_path, output_path, use_pdf_snippets=pdf_snippets)
+    except (OSError, ValueError) as exc:
+        if json_mode:
+            emit_json_failure(
+                "plan-organization",
+                code="organization-input-invalid",
+                message="The organization input is missing or invalid.",
+            )
+        raise exc
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "plan-organization",
+                data={
+                    "scannedItems": plan.stats.scanned_items,
+                    "classifiedItems": plan.stats.classified_items,
+                    "inboxItems": plan.stats.inbox_items,
+                    "lowConfidenceItems": plan.stats.low_confidence_items,
+                    "artifact": {"kind": "organization-plan", "name": artifact_name(output_path)},
+                    "writesExecuted": False,
+                    "nextAction": "review-plan",
+                },
+            )
+        )
+        return
     console.print(
         "Planned "
         f"{plan.stats.scanned_items} items: "
