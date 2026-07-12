@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "applicationId": "paperflow",
   "applicationVersion": "0.1.0",
-  "sourceCommit": "056e6251dc07cc74f39c1df7ed2060481e623083",
+  "sourceCommit": "7c7bd013d171e2e58e0a5cee97faacd0c02ee8a8",
   "scenarioId": "zotero-readonly-plan-boundary",
   "usesDemoData": true,
   "captureDate": "2026-07-13",
