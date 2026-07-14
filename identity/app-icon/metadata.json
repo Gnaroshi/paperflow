@@ -1,0 +1,12 @@
+{
+  "id": "paperflow-v1",
+  "sourceCandidate": "app-family-p5-paperflow",
+  "sourceSha256": "53bc355d4f4c359156d35d697636fc93a43acdbfbe0b0156836cbefcab13c449",
+  "exportedAt": "2026-07-14",
+  "masterSize": "2048x2048",
+  "productionSizes": [16, 32, 64, 128, 256, 512, 1024],
+  "targetPlatforms": ["macOS", "Gnaroshi Studio managed-app card"],
+  "ownerApproved": true,
+  "menuBarTemplate": "SF Symbol doc.text.magnifyingglass",
+  "menuBarUsesFullColorMascot": false
+}
