@@ -74,8 +74,10 @@ final class AppServices {
             window.setFrameAutosaveName("PaperFlow Main Window")
             window.center()
             window.contentView = NSHostingView(
-                rootView: MainWindowView()
-                    .environmentObject(state)
+                rootView: Group {
+                    if ShowcaseMode.isEnabled() { ShowcaseView() }
+                    else { MainWindowView().environmentObject(state) }
+                }
             )
             mainWindowController = NSWindowController(window: window)
         }
@@ -88,6 +90,7 @@ final class AppServices {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        guard !ShowcaseMode.isEnabled() else { return }
         Task { @MainActor in
             AppServices.shared.start()
         }
@@ -112,10 +115,13 @@ struct PaperFlowApp: App {
 
     var body: some Scene {
         WindowGroup("PaperFlow") {
-            MainWindowView()
-                .environmentObject(AppServices.shared.state)
+            Group {
+                if ShowcaseMode.isEnabled() { ShowcaseView() }
+                else { MainWindowView().environmentObject(AppServices.shared.state) }
+            }
                 .frame(minWidth: 980, minHeight: 700)
                 .onAppear {
+                    guard !ShowcaseMode.isEnabled() else { return }
                     Task { @MainActor in
                         AppServices.shared.start()
                     }
