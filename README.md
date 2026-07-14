@@ -67,3 +67,29 @@ uv run paperflow zotero apply-plan --mode add-only
 The apply command refuses to write unless `--apply`, `ZOTERO_USER_ID`, and
 `ZOTERO_API_KEY` are present, and the write backend remains disabled in this
 version.
+
+## Gnaroshi Studio integration
+
+PaperFlow remains independently runnable. Studio uses the provider-owned
+`gnaroshi.app.json` and fixed read-only or dry-run commands:
+
+```bash
+paperflow version --json
+paperflow status --json
+paperflow doctor --json
+paperflow zotero scan --json
+paperflow zotero plan-organize --json
+paperflow import --file /user/selected/paper.pdf --dry-run --json
+paperflow import --url https://example.org/paper --dry-run --json
+paperflow import --arxiv 2401.00001 --dry-run --json
+paperflow import --metadata /user/selected/candidate.json --dry-run --json
+```
+
+JSON mode emits one schema-v1 object on stdout and sends generic diagnostics to
+stderr. The import command has no apply mode: it returns a preview disposition
+and planned changes, then requires review in PaperFlow. Studio never reads or
+writes Zotero, the managed vault, PaperFlow credentials, or internal reports
+directly.
+
+See `docs/decisions/MDS-001-studio-integration.md` for preservation,
+compatibility, tests, and rollback.

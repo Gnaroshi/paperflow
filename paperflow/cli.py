@@ -68,6 +68,23 @@ from paperflow.ingest import (
     validate_ingest_request,
     write_ingest_report,
 )
+from paperflow import __version__
+from paperflow.integration import (
+    IntegrationError,
+    MetadataCandidate,
+    artifact_name,
+    build_provenance,
+    doctor_data,
+    emit_json,
+    emit_json_failure,
+    integration_envelope,
+    planned_handoff_changes,
+    recent_activity_data,
+    stable_source_id,
+    status_data,
+    validate_arxiv_id,
+)
+from paperflow.metadata import arxiv_id_from_url
 from paperflow.local_import import (
     LOCAL_IMPORT_CONFIRMATION,
     SOURCE_QUARANTINE_CONFIRMATION,
@@ -182,6 +199,296 @@ app.add_typer(taxonomy_app, name="taxonomy")
 class ApplyModeOption(StrEnum):
     ADD_ONLY = "add-only"
     REPLACE_COLLECTIONS = "replace-collections"
+
+
+@app.command("version")
+def version_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+) -> None:
+    """Show the PaperFlow CLI and integration contract versions."""
+
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "version",
+                data={"version": __version__, "contractVersion": 1, "build": build_provenance()},
+            )
+        )
+        return
+    console.print(f"paperflow {__version__}")
+
+
+@app.command("status")
+def status_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+) -> None:
+    """Show non-sensitive integration availability and artifact status."""
+
+    data = status_data()
+    if json_mode:
+        emit_json(integration_envelope("status", data=data))
+        return
+    console.print("PaperFlow is available.")
+    console.print("Zotero scanning is read-only; writes require an explicit apply command.")
+
+
+@app.command("recent")
+def recent_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+    limit: int = typer.Option(5, "--limit", min=1, max=20),
+    data_dir: Path = typer.Option(Path("data"), "--data-dir", hidden=True),
+) -> None:
+    """Show bounded, non-sensitive recent PaperFlow activity."""
+
+    data = recent_activity_data(data_dir, limit=limit)
+    if json_mode:
+        emit_json(integration_envelope("recent-activity", data=data))
+        return
+    if not data["activities"]:
+        console.print("No recent PaperFlow plans or scans are available.")
+        return
+    for activity in data["activities"]:
+        console.print(f"{activity['occurredAt']}  {activity['summary']}")
+
+
+@app.command("doctor")
+def doctor_command(
+    json_mode: bool = typer.Option(False, "--json", help="Emit versioned JSON."),
+    base_url: str = typer.Option(
+        DEFAULT_LOCAL_API_BASE_URL,
+        "--base-url",
+        help="Zotero Local API base URL.",
+    ),
+    library_prefix: str = typer.Option(
+        DEFAULT_LIBRARY_PREFIX,
+        "--library-prefix",
+        help="Local API library prefix, usually /users/0.",
+    ),
+) -> None:
+    """Check read-only prerequisites without exposing credentials or paths."""
+
+    try:
+        with ZoteroLocalClient(base_url=base_url, library_prefix=library_prefix) as client:
+            local_api_available = client.health_check()
+    except (LocalAPIUnavailable, ValueError):
+        local_api_available = False
+
+    state, data, warnings = doctor_data(local_api_available=local_api_available)
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "health",
+                status="ok" if state == "ok" else "blocked",
+                data=data,
+                warnings=warnings,
+                errors=[] if state == "ok" else [
+                    IntegrationError(
+                        code="zotero-local-api-unavailable",
+                        message="Zotero Local API is unavailable.",
+                    )
+                ],
+            )
+        )
+        if state != "ok":
+            typer.echo("PaperFlow health check blocked: zotero-local-api-unavailable", err=True)
+            raise typer.Exit(2)
+        return
+
+    if local_api_available:
+        console.print("[bold green]Zotero Local API is available.[/bold green]")
+        return
+    console.print(f"[bold red]{LOCAL_API_SETUP_MESSAGE}[/bold red]")
+    raise typer.Exit(2)
+
+
+def _handoff_duplicate(
+    *,
+    doi: str | None,
+    arxiv_id: str | None,
+    url: str | None,
+) -> str | None:
+    try:
+        with ZoteroLocalClient() as client:
+            items = client.scan_items()
+    except LocalAPIUnavailable:
+        return None
+    normalized_doi = (doi or "").strip().lower().removeprefix("https://doi.org/")
+    for item in items:
+        item_doi = (item.doi or "").strip().lower().removeprefix("https://doi.org/")
+        item_arxiv = arxiv_id_from_url(item.url) or arxiv_id_from_url(item.doi)
+        if normalized_doi and item_doi == normalized_doi:
+            return f"zotero-item:{item.key}"
+        if arxiv_id and item_arxiv and item_arxiv.lower() == arxiv_id.lower():
+            return f"zotero-item:{item.key}"
+        if url and item.url and item.url.rstrip("/") == url.rstrip("/"):
+            return f"zotero-item:{item.key}"
+    return None
+
+
+def _emit_handoff_rejection(json_mode: bool, code: str, message: str) -> None:
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "import-paper",
+                status="failed",
+                data={
+                    "disposition": "rejected",
+                    "plannedChanges": [],
+                    "resultingLocalRecordId": None,
+                    "writesExecuted": False,
+                },
+                errors=[IntegrationError(code=code, message=message)],
+            )
+        )
+        typer.echo(f"PaperFlow import rejected: {code}", err=True)
+    else:
+        console.print(f"[bold red]{message}[/bold red]")
+    raise typer.Exit(2)
+
+
+@app.command("import")
+def import_command(
+    file_path: Path | None = typer.Option(
+        None,
+        "--file",
+        help="User-selected local PDF to preview.",
+    ),
+    paper_url: str | None = typer.Option(
+        None,
+        "--url",
+        help="Paper URL to preview.",
+    ),
+    arxiv_id: str | None = typer.Option(
+        None,
+        "--arxiv",
+        help="arXiv identifier to preview.",
+    ),
+    metadata_path: Path | None = typer.Option(
+        None,
+        "--metadata",
+        help="User-selected schema-v1 metadata candidate JSON.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Required. Preview only; never writes Zotero or copies files.",
+    ),
+    json_mode: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit one versioned JSON result on stdout.",
+    ),
+) -> None:
+    """Preview a Studio-safe paper handoff without applying changes."""
+
+    if not dry_run:
+        _emit_handoff_rejection(
+            json_mode,
+            "dry-run-required",
+            "PaperFlow imports from Studio are preview-only; pass --dry-run.",
+        )
+    selected = [
+        ("file", file_path),
+        ("url", paper_url),
+        ("arxiv", arxiv_id),
+        ("metadata", metadata_path),
+    ]
+    present = [(kind, value) for kind, value in selected if value is not None]
+    if len(present) != 1:
+        _emit_handoff_rejection(
+            json_mode,
+            "exactly-one-source-required",
+            "Select exactly one of --file, --url, --arxiv, or --metadata.",
+        )
+
+    source_type, source = present[0]
+    duplicate_id: str | None = None
+    warnings: list[str] = []
+    source_id: str
+    disposition = "needs-review"
+
+    try:
+        if source_type == "file":
+            path = Path(source).expanduser().resolve(strict=True)
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                raise ValueError("Selected file must be an existing PDF")
+            plan = build_ingest_plan([path], network_enabled=False)
+            item = plan["items"][0]
+            source_id = f"file-sha256:{item['source_sha256']}"
+            duplicate_id = _handoff_duplicate(
+                doi=item.get("doi_normalized"),
+                arxiv_id=item.get("arxiv_id"),
+                url=None,
+            )
+            disposition = "duplicate" if duplicate_id else "accepted"
+        elif source_type == "url":
+            parsed = httpx.URL(str(source))
+            if parsed.scheme not in {"http", "https"} or parsed.userinfo:
+                raise ValueError("Paper URL must use HTTP or HTTPS without credentials")
+            normalized_url = str(parsed.copy_with(fragment=None))
+            detected_arxiv = arxiv_id_from_url(normalized_url)
+            source_id = stable_source_id("url", normalized_url)
+            duplicate_id = _handoff_duplicate(
+                doi=None,
+                arxiv_id=detected_arxiv,
+                url=normalized_url,
+            )
+            disposition = "duplicate" if duplicate_id else "needs-review"
+        elif source_type == "arxiv":
+            normalized_arxiv = validate_arxiv_id(str(source))
+            source_id = f"arxiv:{normalized_arxiv.lower()}"
+            duplicate_id = _handoff_duplicate(
+                doi=None,
+                arxiv_id=normalized_arxiv,
+                url=f"https://arxiv.org/abs/{normalized_arxiv}",
+            )
+            disposition = "duplicate" if duplicate_id else "needs-review"
+        else:
+            path = Path(source).expanduser().resolve(strict=True)
+            if not path.is_file() or path.suffix.lower() != ".json":
+                raise ValueError("Metadata candidate must be an existing JSON file")
+            candidate = MetadataCandidate.model_validate_json(path.read_text(encoding="utf-8"))
+            candidate_url = str(candidate.url) if candidate.url else None
+            candidate_arxiv = candidate.arxiv_id or arxiv_id_from_url(candidate_url)
+            identity = candidate.doi or candidate_arxiv or candidate_url or candidate.title or "candidate"
+            source_id = stable_source_id("metadata", identity)
+            duplicate_id = _handoff_duplicate(
+                doi=candidate.doi,
+                arxiv_id=candidate_arxiv,
+                url=candidate_url,
+            )
+            disposition = "duplicate" if duplicate_id else "needs-review"
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _emit_handoff_rejection(
+            json_mode,
+            "invalid-handoff-source",
+            "The selected handoff source is missing or invalid.",
+        )
+        raise AssertionError("unreachable") from exc
+
+    data = {
+        "disposition": disposition,
+        "sourceType": source_type,
+        "sourceId": source_id,
+        "plannedChanges": planned_handoff_changes(source_type),
+        "resultingLocalRecordId": duplicate_id,
+        "writesExecuted": False,
+        "nextAction": "open-paperflow-to-review",
+    }
+    if duplicate_id is None and source_type != "file":
+        warnings.append("Metadata and PDF selection require review in PaperFlow.")
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "import-paper",
+                data=data,
+                warnings=warnings,
+            )
+        )
+        return
+    typer.echo(
+        f"PaperFlow handoff preview: {disposition}. No files copied and no Zotero writes executed."
+    )
 
 
 def parse_bool_value(value: bool | str) -> bool:
@@ -1195,6 +1502,11 @@ def scan(
         "--library-prefix",
         help="Local API library prefix, usually /users/0.",
     ),
+    json_mode: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit one versioned JSON result on stdout.",
+    ),
 ) -> None:
     """Read regular parent items from the Zotero Local API."""
 
@@ -1202,11 +1514,34 @@ def scan(
         with ZoteroLocalClient(base_url=base_url, library_prefix=library_prefix) as client:
             items = client.scan_items()
     except LocalAPIUnavailable:
+        if json_mode:
+            emit_json_failure(
+                "scan-library",
+                code="zotero-local-api-unavailable",
+                message="Zotero Local API is unavailable.",
+                status="unavailable",
+            )
         console.print(f"[bold red]{LOCAL_API_SETUP_MESSAGE}[/bold red]")
         raise typer.Exit(2)
 
     write_jsonl(jsonl_output, items)
     _items_to_csv(items, csv_output)
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "scan-library",
+                data={
+                    "itemCount": len(items),
+                    "source": "zotero-local-api-read-only",
+                    "artifacts": [
+                        {"kind": "zotero-items-jsonl", "name": artifact_name(jsonl_output)},
+                        {"kind": "zotero-items-csv", "name": artifact_name(csv_output)},
+                    ],
+                    "writesExecuted": False,
+                },
+            )
+        )
+        return
     console.print(
         f"Scanned {len(items)} regular Zotero items to {jsonl_output} and {csv_output}."
     )
@@ -1231,10 +1566,40 @@ def plan_organize(
         "--pdf-snippets",
         help="Use first-page PDF snippets when local paths are available.",
     ),
+    json_mode: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit one versioned JSON result on stdout.",
+    ),
 ) -> None:
     """Build a side-effect-free organization plan."""
 
-    plan = plan_from_jsonl(input_path, output_path, use_pdf_snippets=pdf_snippets)
+    try:
+        plan = plan_from_jsonl(input_path, output_path, use_pdf_snippets=pdf_snippets)
+    except (OSError, ValueError) as exc:
+        if json_mode:
+            emit_json_failure(
+                "plan-organization",
+                code="organization-input-invalid",
+                message="The organization input is missing or invalid.",
+            )
+        raise exc
+    if json_mode:
+        emit_json(
+            integration_envelope(
+                "plan-organization",
+                data={
+                    "scannedItems": plan.stats.scanned_items,
+                    "classifiedItems": plan.stats.classified_items,
+                    "inboxItems": plan.stats.inbox_items,
+                    "lowConfidenceItems": plan.stats.low_confidence_items,
+                    "artifact": {"kind": "organization-plan", "name": artifact_name(output_path)},
+                    "writesExecuted": False,
+                    "nextAction": "review-plan",
+                },
+            )
+        )
+        return
     console.print(
         "Planned "
         f"{plan.stats.scanned_items} items: "
