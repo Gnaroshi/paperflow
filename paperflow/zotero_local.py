@@ -196,6 +196,14 @@ class ZoteroLocalClient:
                 raise LocalAPIUnavailable(LOCAL_API_SETUP_MESSAGE) from exc
             raise
 
+    def health_check(self) -> bool:
+        """Check Local API availability with one bounded read-only request."""
+
+        payload = self._get_json("items/top", params={"format": "json", "limit": 1})
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected Zotero Local API health response")
+        return True
+
     def iter_top_items(self, limit: int = 100) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         start = 0
