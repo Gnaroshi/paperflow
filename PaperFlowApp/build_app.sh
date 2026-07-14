@@ -44,6 +44,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$SCRIPT_DIR/.build/release/PaperFlowApp" "$MACOS_DIR/PaperFlow"
 cp "$SCRIPT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$SCRIPT_DIR/../identity/app-icon/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 cp "$SCRIPT_DIR/../gnaroshi.app.json" "$RESOURCES_DIR/gnaroshi.app.json"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
