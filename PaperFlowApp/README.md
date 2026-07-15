@@ -6,7 +6,8 @@ optional screen-edge hot-zones, plus a Raycast-style command window and a full
 control-panel window.
 The app does not classify papers or rewrite Zotero logic in Swift. It passes
 commands and paths to the CLI, parses local reports, and keeps apply operations
-behind typed confirmations.
+behind current previews, backups, explicit Apply actions, and stronger confirmation
+only for irreversible cleanup.
 
 ## Local-first Zotero model
 
@@ -50,6 +51,12 @@ For local Spotlight launch, install the app into `/Applications`:
 ./install_app.sh
 ```
 
+The installer rebuilds from the current committed source, verifies clean build
+provenance and the Developer ID identity, refuses to replace a running installed
+app, keeps a rollback copy during atomic replacement, and confirms the exact
+Spotlight path. Quit PaperFlow normally before installing. `SKIP_BUILD=1` is only
+for a previously verified bundle whose embedded commit matches the checkout.
+
 Then press `Command-Space`, type `PaperFlow`, and press Return.
 
 For GitHub download distribution, upload `dist/PaperFlow.zip` and
@@ -91,8 +98,10 @@ from `dist/PaperFlow.app` during development. The menu bar item is only for
 status/settings/actions; it is not the PDF drop surface. Use Settings for:
 
 - `PaperFlow project directory`: the folder containing `pyproject.toml`
-- `uv path`: usually `/opt/homebrew/bin/uv`, `/usr/local/bin/uv`, or
-  `~/.local/bin/uv`
+- `uv path`: use the repo-local `bin/paperflow-uv` wrapper. Run
+  `scripts/bootstrap_uv.sh` once to copy the uv binary into
+  `.paperflow/bin/uv`. The wrapper isolates `.venv`, uv cache, downloaded
+  Python versions, and uv tools inside this repository.
 - `local vault path`: default `~/Papers/Paperflow/Library`
 - Zotero API key: stored in macOS Keychain and redacted in logs
 - Numeric Zotero user ID: fetch from the Zotero API key; email addresses and
@@ -181,25 +190,18 @@ Default shortcuts:
 
 ## Safety
 
-Apply Migration requires typing:
+Routine PDF ingest and migration Apply do not require a repeated typed phrase.
+They remain blocked until their current preview, scope and required backup are
+verified. Developer details are hidden by default and can be enabled from
+Settings > Advanced & Diagnostics.
 
-```text
-REPLACE MY ZOTERO COLLECTIONS
-```
-
-PDF ingest apply requires typing:
-
-```text
-INGEST LOCAL PDFS
-```
-
-Stored attachment cleanup requires typing:
+Irreversible stored attachment cleanup requires typing:
 
 ```text
 DELETE OLD STORED PDF ATTACHMENTS
 ```
 
-Abstract and metadata cleanup applies require typing:
+Other high-risk bulk cleanup actions may require typing:
 
 ```text
 APPLY ABSTRACT REPAIRS
@@ -215,6 +217,25 @@ The app writes its own logs to:
 Secrets are redacted from displayed and saved command output.
 
 ## Troubleshooting
+
+### Keychain or Desktop permission appears after every rebuild
+
+PaperFlow needs a stable Apple code-signing identity. An ad-hoc signature changes
+whenever the executable is rebuilt, so macOS can treat the next build as a different
+application even though the bundle identifier remains `com.paperflow.app`. Keychain
+"Always Allow" and Files & Folders consent then apply only to the previous build.
+
+1. Open Xcode -> Settings -> Accounts and select the Apple Developer account.
+2. Open Manage Certificates and create or download an Apple Development certificate
+   for local builds. Use Developer ID Application for public distribution.
+3. Confirm `security find-identity -v -p codesigning` lists the certificate.
+4. Run `./build_app.sh`. It automatically prefers Developer ID Application, then
+   Apple Development. `PAPERFLOW_SIGNING_IDENTITY` can select one explicitly.
+5. Install the newly signed app, open it once, and approve Keychain and Desktop access.
+
+The current PaperFlow project is under `~/Desktop`, which is a macOS protected
+folder. Keeping the project under `~/Developer` avoids Desktop-folder consent. If it
+stays on Desktop, a stable signature allows the approval to survive future builds.
 
 - If `uv` cannot be found, set the full executable path in Settings.
 - If Zotero Web API calls fail, verify that `ZOTERO_USER_ID` is numeric and the

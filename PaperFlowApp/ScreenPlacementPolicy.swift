@@ -1,13 +1,22 @@
 import AppKit
 
 enum ScreenPlacementPolicy {
+    /// Space membership and display placement are independent. The shelf stays
+    /// anchored to its selected physical display while joining every Space on
+    /// that display.
+    static let showsAcrossSpacesByDefault = true
+
     static let shelfMarginRight: CGFloat = 24
     static let shelfMarginBottom: CGFloat = 24
     static let compactShelfSize = NSSize(width: 420, height: 96)
-    static let dropReadyShelfSize = NSSize(width: 560, height: 260)
+    static let dropReadyShelfSize = NSSize(width: 600, height: 400)
     static let processingShelfSize = NSSize(width: 640, height: 420)
     static let resultShelfSize = NSSize(width: 680, height: 520)
-    static let expandedShelfSize = NSSize(width: 560, height: 260)
+    static let expandedShelfSize = NSSize(width: 600, height: 400)
+
+    static func showAcrossSpacesValue(currentValue: Bool, migrationApplied: Bool) -> Bool {
+        migrationApplied ? currentValue : showsAcrossSpacesByDefault
+    }
 
     static func shelfFrame(
         on screen: NSScreen,
@@ -102,7 +111,10 @@ enum ScreenPlacementPolicy {
 
     static func commandPopupFrame(on screen: NSScreen) -> NSRect {
         let visible = screen.visibleFrame
-        let size = NSSize(width: 680, height: 520)
+        let size = NSSize(
+            width: min(680, max(420, visible.width - 48)),
+            height: min(520, max(360, visible.height - 48))
+        )
         return NSRect(
             x: visible.midX - size.width / 2,
             y: visible.midY - size.height / 2,

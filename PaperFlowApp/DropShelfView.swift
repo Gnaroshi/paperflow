@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct DropShelfView: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject var controller: FloatingDropShelfController
-    @State private var applyConfirmation = ""
     @State private var processingStartedAt: Date?
     @State private var mode: PFWMode = .drop
 
@@ -32,6 +31,11 @@ struct DropShelfView: View {
                 controller.commandFinished(success: false)
             case .idle:
                 break
+            }
+        }
+        .onChange(of: state.showTechnicalDetails) { showTechnicalDetails in
+            if !showTechnicalDetails && mode == .logs {
+                mode = .drop
             }
         }
     }
@@ -109,7 +113,7 @@ struct DropShelfView: View {
                 VStack(alignment: .leading, spacing: 3) {
                 Text(state.dropShelfPhase.label)
                     .font(.headline)
-                Text(state.shelfLastResult)
+                Text(state.showTechnicalDetails ? state.shelfLastResult : shelfSubtitle)
                     .font(.caption)
                     .foregroundStyle(PaperFlowTheme.muted)
                     .lineLimit(1)
@@ -120,7 +124,7 @@ struct DropShelfView: View {
             .help("Click to hide PFW")
             Spacer(minLength: 8)
             Picker("PFW mode", selection: $mode) {
-                ForEach(PFWMode.allCases) { mode in
+                ForEach(PFWMode.visibleCases(showTechnicalDetails: state.showTechnicalDetails)) { mode in
                     Label(mode.label, systemImage: mode.symbolName).tag(mode)
                 }
             }
@@ -157,56 +161,100 @@ struct DropShelfView: View {
         }
     }
 
+    @ViewBuilder
     private var pfwFooter: some View {
-        HStack {
-            Button {
-                state.dropShelfAction = .dryRunIngest
-                state.runDropShelfSelectedAction()
-            } label: {
-                Label("Run Dry Run", systemImage: "play.circle")
+        if mode == .drop {
+            dropFooter
+        } else {
+            secondaryModeFooter
+        }
+    }
+
+    private var dropFooter: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                runDryRunButton
+                applyButton
+                openFinderButton
+                clearButton
+                Spacer(minLength: 8)
+                hidePFWButton
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(state.droppedPDFs.isEmpty || state.runner.isRunning || state.dropShelfPhase == .hoveringInvalidFile)
-
-            Button(role: .destructive) {
-                state.dropShelfAction = .applyIngest
-                state.runDropShelfSelectedAction()
-            } label: {
-                Label("Apply", systemImage: "exclamationmark.triangle")
-            }
-            .disabled(
-                state.droppedPDFs.isEmpty
-                || state.runner.isRunning
-                || applyConfirmation != ConfirmationKind.applyIngest.requiredText
-                || !state.shelfStoreInLocalVault
-                || !state.shelfLinkToZoteroNoUpload
-            )
-
-            Button("Open in Finder") {
-                if !state.droppedPDFs.isEmpty {
-                    NSWorkspace.shared.activateFileViewerSelecting(state.droppedPDFs.map(\.url))
-                }
-            }
-            .disabled(state.droppedPDFs.isEmpty)
-
-            Button("Clear") {
-                state.clearPDFs()
-                state.dropShelfPhase = .idleCompact
-                state.shelfLastResult = "Ready"
-                applyConfirmation = ""
-            }
-            .disabled(state.runner.isRunning)
-
-            Spacer()
-
-            Button("Hide PFW") {
-                controller.hideShelf()
+            FlowLayout(spacing: 8) {
+                runDryRunButton
+                applyButton
+                openFinderButton
+                clearButton
+                hidePFWButton
             }
         }
         .font(.caption)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(PaperFlowTheme.panel0.opacity(0.86))
+    }
+
+    private var secondaryModeFooter: some View {
+        HStack(spacing: 8) {
+            Button("Open Main Window") { AppServices.shared.openMainWindow() }
+            Button("Refresh") { state.refreshStatus() }
+            Spacer(minLength: 8)
+            hidePFWButton
+        }
+        .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(PaperFlowTheme.panel0.opacity(0.86))
+    }
+
+    private var runDryRunButton: some View {
+        Button {
+            state.dropShelfAction = .dryRunIngest
+            state.runDropShelfSelectedAction()
+        } label: {
+            Label("Preview", systemImage: "play.circle")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(state.droppedPDFs.isEmpty || state.runner.isRunning || state.dropShelfPhase == .hoveringInvalidFile)
+    }
+
+    private var applyButton: some View {
+        Button(role: .destructive) {
+            state.dropShelfAction = .applyIngest
+            state.runDropShelfSelectedAction()
+        } label: {
+            Label("Apply", systemImage: "exclamationmark.triangle")
+        }
+        .disabled(
+            state.droppedPDFs.isEmpty
+            || state.runner.isRunning
+            || state.ingestApplyBlocker != nil
+        )
+    }
+
+    private var openFinderButton: some View {
+        Button("Open in Finder") {
+            if !state.droppedPDFs.isEmpty {
+                NSWorkspace.shared.activateFileViewerSelecting(state.droppedPDFs.map(\.url))
+            }
+        }
+        .disabled(state.droppedPDFs.isEmpty)
+    }
+
+    private var clearButton: some View {
+        Button("Clear") {
+            state.clearPDFs()
+            state.dropShelfPhase = .idleCompact
+            state.shelfLastResult = "Ready"
+        }
+        .disabled(
+            state.runner.isRunning
+            || (state.droppedPDFs.isEmpty && state.invalidDropWarnings.isEmpty && state.dropShelfPhase == .idleCompact)
+        )
+    }
+
+    private var hidePFWButton: some View {
+        Button("Hide PFW") { controller.hideShelf() }
     }
 
     @ViewBuilder
@@ -222,12 +270,7 @@ struct DropShelfView: View {
             dropTarget
             queuedFilesView
             warningsView
-            actionChoiceView
-            safetyOptionsView
-            if state.dropShelfAction == .applyIngest {
-                TextField("Type INGEST LOCAL PDFS", text: $applyConfirmation)
-                    .paperFlowTextInput()
-            }
+            ingestApplyStatus
         }
     }
 
@@ -278,56 +321,84 @@ struct DropShelfView: View {
         }
     }
 
-    private var safetyOptionsView: some View {
-        HStack(spacing: 14) {
-            Toggle("local vault", isOn: $state.shelfStoreInLocalVault)
-            Toggle("linked attachment only", isOn: $state.shelfLinkToZoteroNoUpload)
-            Toggle("auto dry-run", isOn: $state.autoDryRunAfterDrop)
-        }
-        .font(.caption)
-    }
-
-    private var actionChoiceView: some View {
-        Picker("Target action", selection: $state.dropShelfAction) {
-            ForEach(DropShelfAction.allCases) { action in
-                Text(action.label).tag(action)
+    @ViewBuilder
+    private var ingestApplyStatus: some View {
+        if !state.droppedPDFs.isEmpty {
+            if let blocker = state.ingestApplyBlocker {
+                Label(blocker, systemImage: "lock.fill")
+                    .foregroundStyle(PaperFlowTheme.muted)
+            } else {
+                Label(
+                    "Preview is current. Apply will add these PDFs to your local library and Zotero.",
+                    systemImage: "checkmark.shield"
+                )
+                .foregroundStyle(PaperFlowTheme.mint)
             }
         }
-        .pickerStyle(.segmented)
-        .font(.caption)
     }
 
     private var statusMiniDashboard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], spacing: 8) {
                 MiniStatus(label: "Zotero", value: state.zoteroConnectionStatus)
-                MiniStatus(label: "Gemini", value: state.geminiConnectionStatus)
+                MiniStatus(label: "PDF library", value: state.vaultStatus.exists ? "Ready" : "Setup required")
+                MiniStatus(label: "Last action", value: userRunStatus)
+                MiniStatus(label: "Needs review", value: "\(state.dashboard.missingAbstractItems + state.dashboard.duplicateCandidates + state.dashboard.lowConfidenceItems)")
             }
-            HStack {
-                MiniStatus(label: "Vault", value: state.vaultStatus.exists ? "Ready" : "Missing")
-                MiniStatus(label: "Last command", value: state.runner.status.label)
-            }
-            HStack {
-                MiniStatus(label: "Missing abstract", value: "\(state.dashboard.missingAbstractItems)")
-                MiniStatus(label: "Duplicates", value: "\(state.dashboard.duplicateCandidates)")
-            }
-            Text("Data sync and file sync are separate. Local linked PDFs should not consume Zotero Storage.")
-                .font(.caption)
-                .foregroundStyle(PaperFlowTheme.muted)
         }
     }
 
     private var recentView: some View {
         VStack(alignment: .leading, spacing: 10) {
             ingestPlanSummary
-            HStack {
-                Button("Open Report") {
-                    NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+            FlowLayout(spacing: 8) {
+                if state.showTechnicalDetails {
+                    Button("Open Report") {
+                        NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+                    }
+                    Button("Open Reports") { state.openReportsFolder() }
                 }
-                Button("Open Vault") { state.openVault() }
-                Button("Open Reports") { state.openReportsFolder() }
+                Button("Open PDF Library") { state.openVault() }
             }
             .font(.caption)
+        }
+    }
+
+    private var shelfSubtitle: String {
+        switch state.dropShelfPhase {
+        case .idleCompact:
+            return "Drop PDFs to preview"
+        case .hoveringValidPDF:
+            return "Release to add these PDFs"
+        case .hoveringInvalidFile:
+            return "Only PDF files can be added"
+        case .queued:
+            return "Ready to preview"
+        case .processing:
+            return "Checking your PDFs"
+        case .success:
+            return "Review the result and apply when ready"
+        case .failure:
+            return "Nothing was changed"
+        case .reviewNeeded:
+            return "Choose a classification to continue"
+        }
+    }
+
+    private var userRunStatus: String {
+        switch state.runner.status {
+        case .idle:
+            return "Ready"
+        case .running:
+            return "Working"
+        case .succeeded:
+            return "Completed"
+        case .failed:
+            return "Needs attention"
+        case .timedOut:
+            return "Took too long"
+        case .cancelled:
+            return "Cancelled"
         }
     }
 
@@ -336,13 +407,13 @@ struct DropShelfView: View {
             Text("Zotero organization")
                 .font(.subheadline)
                 .fontWeight(.semibold)
-            Text("Apply Migration requires typed confirmation in the main window. It changes collections/tags only and should not delete notes, annotations, highlights, or attachments.")
+            Text("Complete Backup, Plan, and Preview in the main window before Apply. PDFs and reading work are preserved.")
                 .font(.caption)
                 .foregroundStyle(PaperFlowTheme.muted)
-            HStack {
+            FlowLayout(spacing: 8) {
                 Button("Backup") { state.runBackupZotero() }
                 Button("Plan Migration") { state.runPlanMigration() }
-                Button("Dry Run Migration") { state.runDryRunMigration() }
+                Button("Preview Migration") { state.runDryRunMigration() }
                 Button("Open Workbench") {
                     AppServices.shared.openMainWindow(section: .cleanupWorkbench)
                 }
@@ -354,16 +425,16 @@ struct DropShelfView: View {
 
     private var logsMiniView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(state.runner.currentCommand.isEmpty ? "No command running." : state.runner.currentCommand)
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Button("Copy") { state.runner.copyOutput() }
-                    .disabled(state.runner.output.isEmpty)
-                Button("Open Log") { state.runner.openLogFile() }
-                    .disabled(state.runner.currentLogFile == nil)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    logCommandText
+                    Spacer()
+                    logActionButtons
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    logCommandText
+                    logActionButtons
+                }
             }
             Text(logTail(maxLines: 12).isEmpty ? "No command output yet." : logTail(maxLines: 12))
                 .font(.system(.caption, design: .monospaced))
@@ -372,6 +443,22 @@ struct DropShelfView: View {
                 .padding(8)
                 .background(PaperFlowTheme.canvas0.opacity(0.78))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    private var logCommandText: some View {
+        Text(state.runner.currentCommand.isEmpty ? "No command running." : state.runner.currentCommand)
+            .font(.system(.caption, design: .monospaced))
+            .lineLimit(1)
+            .truncationMode(.middle)
+    }
+
+    private var logActionButtons: some View {
+        HStack(spacing: 8) {
+            Button("Copy") { state.runner.copyOutput() }
+                .disabled(state.runner.output.isEmpty)
+            Button("Open Log") { state.runner.openLogFile() }
+                .disabled(state.runner.currentLogFile == nil)
         }
     }
 
@@ -396,20 +483,11 @@ struct DropShelfView: View {
     }
 
     private var cardBackground: some View {
-        ZStack {
-            LinearGradient(
-                colors: theme.background,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [theme.glow.opacity(0.22), .clear],
-                center: .topTrailing,
-                startRadius: 24,
-                endRadius: 420
-            )
-            PaperFlowTheme.panel0.opacity(0.64)
-        }
+        LinearGradient(
+            colors: theme.background,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private var theme: PFWTheme {
@@ -490,51 +568,51 @@ struct DropShelfView: View {
                 completedStages: state.runner.completedStages
             )
             TimelineView(.periodic(from: processingStartedAt ?? Date(), by: 1)) { context in
-                HStack(spacing: 10) {
+                FlowLayout(spacing: 10) {
                     Text("Elapsed: \(elapsedLabel(now: context.date))")
-                    if let pid = state.runner.currentPID {
-                        Text("PID: \(pid)")
-                    }
-                    Text("Stage: \(stageLabel(state.runner.currentStage))")
+                    Text(stageLabel(state.runner.currentStage))
                 }
                 .font(.caption)
                 .foregroundStyle(PaperFlowTheme.muted)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(state.runner.currentCommand.isEmpty ? "paperflow command is running" : state.runner.currentCommand)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(PaperFlowTheme.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(state.runner.currentWorkingDirectory)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(PaperFlowTheme.faint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if !state.runner.lastHeartbeat.isEmpty {
-                    Text(state.runner.lastHeartbeat)
-                        .font(.caption)
+            if state.showTechnicalDetails {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(state.runner.currentCommand)
+                        .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(PaperFlowTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(state.runner.currentWorkingDirectory)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(PaperFlowTheme.faint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if !state.runner.lastHeartbeat.isEmpty {
+                        Text(state.runner.lastHeartbeat)
+                            .font(.caption)
+                            .foregroundStyle(PaperFlowTheme.muted)
+                    }
                 }
-                if let warning = state.runner.noOutputWarning {
-                    Text(warning)
-                        .font(.caption)
-                        .foregroundStyle(state.runner.stalledWarning ? .red : .orange)
-                }
+                Text(logTail(maxLines: 5).isEmpty ? "Waiting for details..." : logTail(maxLines: 5))
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+                    .padding(8)
+                    .background(PaperFlowTheme.canvas0.opacity(0.86))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            Text(logTail(maxLines: 5).isEmpty ? "Waiting for command output..." : logTail(maxLines: 5))
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
-                .padding(8)
-                .background(PaperFlowTheme.canvas0.opacity(0.86))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            HStack {
-                Button("Open Debug Log") { state.runner.openLogFile() }
-                    .disabled(state.runner.currentLogFile == nil)
-                Button("Copy Log") { state.runner.copyOutput() }
-                    .disabled(state.runner.output.isEmpty)
-                Spacer()
+            if let warning = state.runner.noOutputWarning {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(state.runner.stalledWarning ? .red : .orange)
+            }
+            FlowLayout(spacing: 8) {
+                if state.showTechnicalDetails {
+                    Button("Open Debug Log") { state.runner.openLogFile() }
+                        .disabled(state.runner.currentLogFile == nil)
+                    Button("Copy Log") { state.runner.copyOutput() }
+                        .disabled(state.runner.output.isEmpty)
+                }
                 if state.runner.stalledWarning {
                     Button("Run offline-fast") {
                         state.runner.cancel()
@@ -555,17 +633,18 @@ struct DropShelfView: View {
             HStack {
                 Image(systemName: success ? "checkmark.circle.fill" : "xmark.octagon.fill")
                     .foregroundStyle(success ? Color(red: 0.08, green: 0.56, blue: 0.32) : Color(red: 0.82, green: 0.16, blue: 0.28))
-                Text(success ? "Dry Run Complete" : "Command Failed")
+                Text(success ? "Preview Complete" : "Action Failed")
                     .fontWeight(.semibold)
                 Spacer()
-                Button("Copy Log") { state.runner.copyOutput() }
-                    .disabled(state.runner.output.isEmpty)
+                if state.showTechnicalDetails {
+                    Button("Copy Log") { state.runner.copyOutput() }
+                        .disabled(state.runner.output.isEmpty)
+                }
             }
             if success {
-                HStack(spacing: 12) {
-                    Text(elapsedResultLabel)
-                    Text("No files copied")
-                    Text("No Zotero writes executed")
+                FlowLayout(spacing: 12) {
+                    Text("Preview complete")
+                    Text("No changes were made")
                 }
                 .font(.caption)
                 .foregroundStyle(PaperFlowTheme.muted)
@@ -575,53 +654,61 @@ struct DropShelfView: View {
                         .foregroundStyle(PaperFlowTheme.muted)
                 }
                 ingestPlanSummary
-                HStack {
-                    Button("Open ingest_report.md") {
-                        NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+                FlowLayout(spacing: 8) {
+                    if state.showTechnicalDetails {
+                        Button("Open Technical Report") {
+                            NSWorkspace.shared.open(state.dataURL.appendingPathComponent("ingest_report.md"))
+                        }
                     }
                     Button("Copy Summary") { copyIngestSummary() }
-                    Button("Open Vault") { state.openVault() }
+                    Button("Open PDF Library") { state.openVault() }
                     Button("Hide PFW") { controller.hideShelf() }
                 }
                 .font(.caption)
                 if !state.droppedPDFs.isEmpty {
-                    HStack {
-                        TextField("Type INGEST LOCAL PDFS to enable Apply Ingest", text: $applyConfirmation)
-                            .paperFlowTextInput()
-                        Button(role: .destructive) {
-                            state.dropShelfAction = .applyIngest
-                            state.runDropShelfSelectedAction()
-                        } label: {
-                            Label("Apply Ingest", systemImage: "exclamationmark.triangle")
-                        }
-                        .disabled(
-                            state.runner.isRunning
-                            || applyConfirmation != ConfirmationKind.applyIngest.requiredText
-                            || !state.shelfStoreInLocalVault
-                            || !state.shelfLinkToZoteroNoUpload
-                        )
+                    VStack(alignment: .leading, spacing: 8) {
+                        ingestApplyStatus
+                        applyIngestResultButton
                     }
                     .font(.caption)
                 }
             } else {
-                Text("Command: \(state.runner.currentCommand.isEmpty ? "paperflow" : state.runner.currentCommand)")
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(logTail(maxLines: 5).isEmpty ? state.shelfLastResult : logTail(maxLines: 5))
-                    .font(.system(.caption, design: .monospaced))
+                Text("Nothing was changed. Review the message below and try again.")
+                    .font(.callout)
                     .foregroundStyle(.red)
-                    .textSelection(.enabled)
+                if state.showTechnicalDetails {
+                    Text(state.shelfLastResult)
+                        .font(.caption)
+                    Text(logTail(maxLines: 5))
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                } else {
+                    Text("Try again. If the problem continues, open Settings > Advanced & Diagnostics.")
+                        .font(.caption)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var applyIngestResultButton: some View {
+        Button {
+            state.dropShelfAction = .applyIngest
+            state.runDropShelfSelectedAction()
+        } label: {
+            Label("Add to Zotero", systemImage: "square.and.arrow.down")
+        }
+        .disabled(
+            state.runner.isRunning
+            || state.ingestApplyBlocker != nil
+        )
     }
 
     private var ingestPlanSummary: some View {
         VStack(alignment: .leading, spacing: 4) {
             let rows = latestIngestRows()
             if rows.isEmpty {
-                Text(state.shelfLastResult)
+                Text(state.showTechnicalDetails ? state.shelfLastResult : "Preview finished. Review the planned result before adding it to Zotero.")
                     .font(.caption)
                     .foregroundStyle(PaperFlowTheme.muted)
             } else {
@@ -630,34 +717,29 @@ struct DropShelfView: View {
                         Text(row.title)
                             .font(.caption)
                             .fontWeight(.semibold)
-                        Text(row.mode == "apply" ? "Applied" : "Planned destination")
+                        Text(row.mode == "apply" ? "Added to Zotero" : "Preview")
                             .font(.caption2)
                             .foregroundStyle(PaperFlowTheme.muted)
-                        Text("Source file: \(row.sourceFile)")
-                            .font(.caption)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("\(row.mode == "apply" ? "Linked PDF path" : "Planned vault path"): \(row.finalLinkedPDFPath ?? row.targetPath)")
-                            .font(.caption)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("Storage: \(row.storageMode); upload to Zotero Storage: \(row.uploadToZoteroStorage ? "true" : "false")")
-                            .font(.caption)
-                            .foregroundStyle(PaperFlowTheme.muted)
-                        Text("Planned collections: \(row.collections.isEmpty ? "not available" : row.collections.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(PaperFlowTheme.muted)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("Planned tags: \(row.tags.isEmpty ? "not available" : row.tags.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(PaperFlowTheme.muted)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if let operation = row.zoteroOperation {
-                            Text("Planned Zotero item: \(operation). \(row.zoteroItemKey ?? "Not created yet - this was a dry run.")")
+                        ingestSummaryCollections(row.collections)
+                        ingestReviewGuidance(row)
+                        if state.showTechnicalDetails {
+                            Text("Source: \(row.sourceFile)")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("Destination: \(row.finalLinkedPDFPath ?? row.targetPath)")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("Storage: \(row.storageMode); cloud upload: \(row.uploadToZoteroStorage ? "true" : "false")")
                                 .font(.caption)
                                 .foregroundStyle(PaperFlowTheme.muted)
+                            ingestSummaryTags(row.tags)
+                            if let operation = row.zoteroOperation {
+                                Text("Zotero operation: \(operation). \(row.zoteroItemKey ?? "Preview only")")
+                                    .font(.caption)
+                                    .foregroundStyle(PaperFlowTheme.muted)
+                            }
                         }
                         if let openURI = row.zoteroOpenURI, row.mode == "apply" {
                             Button("Open in Zotero") {
@@ -675,6 +757,86 @@ struct DropShelfView: View {
         }
     }
 
+    @ViewBuilder
+    private func ingestSummaryCollections(_ collections: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Planned collections")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(PaperFlowTheme.muted)
+            if collections.isEmpty {
+                Text("Not available")
+                    .font(.caption)
+                    .foregroundStyle(PaperFlowTheme.muted)
+            } else {
+                ForEach(collections, id: \.self) { collection in
+                    Label(collection, systemImage: "folder")
+                        .font(.caption2)
+                        .foregroundStyle(PaperFlowTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ingestSummaryTags(_ tags: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Planned tags")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(PaperFlowTheme.muted)
+            if tags.isEmpty {
+                Text("Not available")
+                    .font(.caption)
+                    .foregroundStyle(PaperFlowTheme.muted)
+            } else {
+                FlowLayout(spacing: 4) {
+                    ForEach(tags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.caption2)
+                            .foregroundStyle(PaperFlowTheme.ink)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(PaperFlowTheme.sky.opacity(0.12), in: Capsule())
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ingestReviewGuidance(_ row: IngestSummaryRow) -> some View {
+        if row.reviewRequired {
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Review required", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PaperFlowTheme.ink)
+                if let reason = row.reviewReason {
+                    Text("Why: \(reason)")
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let nextAction = row.reviewNextAction {
+                    Text("Next: \(nextAction)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(row.reviewSteps.enumerated()), id: \.offset) { index, step in
+                    Text("\(index + 1). \(step)")
+                        .font(.caption2)
+                        .foregroundStyle(PaperFlowTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperFlowCard(tint: PaperFlowTheme.amber, radius: 10)
+        }
+    }
+
     private struct IngestSummaryRow {
         let sourceFile: String
         let title: String
@@ -687,6 +849,10 @@ struct DropShelfView: View {
         let zoteroItemKey: String?
         let zoteroOpenURI: String?
         let finalLinkedPDFPath: String?
+        let reviewRequired: Bool
+        let reviewReason: String?
+        let reviewNextAction: String?
+        let reviewSteps: [String]
         let mode: String
     }
 
@@ -703,6 +869,7 @@ struct DropShelfView: View {
                 return nil
             }
             let zotero = item["zotero"] as? [String: Any]
+            let review = item["review"] as? [String: Any]
             let finalCollections = item["final_collections"] as? [String]
             let finalTags = item["final_tags"] as? [String]
             return IngestSummaryRow(
@@ -717,6 +884,10 @@ struct DropShelfView: View {
                 zoteroItemKey: zotero?["item_key"] as? String,
                 zoteroOpenURI: zotero?["open_uri"] as? String,
                 finalLinkedPDFPath: item["final_linked_pdf_path"] as? String,
+                reviewRequired: review?["required"] as? Bool ?? false,
+                reviewReason: review?["reason"] as? String,
+                reviewNextAction: review?["next_action"] as? String,
+                reviewSteps: review?["steps"] as? [String] ?? [],
                 mode: mode
             )
         }
@@ -764,6 +935,7 @@ struct DropShelfView: View {
             Planned vault path: \(row.targetPath)
             Collections: \(row.collections.joined(separator: ", "))
             Tags: \(row.tags.joined(separator: ", "))
+            \(row.reviewRequired ? "Review reason: \(row.reviewReason ?? "Classification needs review.")\nNext action: \(row.reviewNextAction ?? "Choose the best matching collection.")" : "Review: not required")
             """
         }.joined(separator: "\n\n")
         NSPasteboard.general.clearContents()
@@ -797,18 +969,13 @@ struct DropShelfView: View {
         ]
 
         var body: some View {
-            HStack(spacing: 8) {
-                ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(Array(stages.enumerated()), id: \.offset) { _, stage in
                     TimelineStep(
                         label: stage.1,
                         filled: completedStages.contains(stage.0) || currentStage == stage.0,
                         active: currentStage == stage.0
                     )
-                    if index < stages.count - 1 {
-                        Rectangle()
-            .fill(completedStages.contains(stage.0) ? PaperFlowTheme.mint.opacity(0.65) : PaperFlowTheme.faint.opacity(0.35))
-                            .frame(height: 2)
-                    }
                 }
             }
         }
@@ -901,11 +1068,11 @@ struct DropShelfView: View {
     private var dropTargetSubtitle: String {
         switch state.dropShelfPhase {
         case .hoveringValidPDF:
-            return "\(state.shelfLastResult) linked-local only; no Zotero Storage upload"
+            return "Release to preview. PDFs will stay on this Mac."
         case .hoveringInvalidFile:
             return state.invalidDropWarnings.first ?? "Non-PDF files will be rejected"
         default:
-            return "linked-local only; no Zotero Storage upload"
+            return "PDFs stay on this Mac and open from Zotero"
         }
     }
 

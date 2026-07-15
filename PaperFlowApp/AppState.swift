@@ -5,8 +5,17 @@ import ServiceManagement
 @MainActor
 final class AppState: ObservableObject {
     private var suppressServiceCallbacks = true
+    private var dryRunIngestScope: [String] = []
 
     @Published var selectedSection: AppSection = .dashboard
+    @Published var showTechnicalDetails = false {
+        didSet {
+            defaults.set(showTechnicalDetails, forKey: "showTechnicalDetails")
+            if !showTechnicalDetails && selectedSection == .logs {
+                selectedSection = .settings
+            }
+        }
+    }
     @Published var droppedPDFs: [DroppedPDF] = []
     @Published var invalidDropWarnings: [String] = []
     @Published var defaultMode: DefaultRunMode = .dryRun {
@@ -145,6 +154,12 @@ final class AppState: ObservableObject {
             refreshVaultStatus()
         }
     }
+    @Published var zoteroStoragePath: String {
+        didSet {
+            defaults.set(zoteroStoragePath, forKey: "zoteroStoragePath")
+            refreshStorageLocations()
+        }
+    }
     @Published var zoteroUserID: String {
         didSet { KeychainStore.write(zoteroUserID, account: "ZOTERO_USER_ID") }
     }
@@ -195,6 +210,8 @@ final class AppState: ObservableObject {
     @Published var launchAtLogin = false
     @Published var dashboard = DashboardSummary()
     @Published var vaultStatus: VaultStatus
+    @Published var zoteroStorageStatus = FolderLocationStatus(name: "Zotero Storage", path: "")
+    @Published var downloadsStatus = FolderLocationStatus(name: "Downloads", path: "")
     @Published var backend = BackendCapability(
         ingestLinkedLocal: true,
         vaultCommands: true,
@@ -233,15 +250,23 @@ final class AppState: ObservableObject {
     init() {
         let defaultProject = Self.defaultProjectPath()
         let defaultVault = Self.defaultVaultPath()
-        projectPath = defaults.string(forKey: "projectPath") ?? defaultProject
-        uvPath = defaults.string(forKey: "uvPath") ?? Self.defaultUVPath()
+        let resolvedProjectPath = defaults.string(forKey: "projectPath") ?? defaultProject
+        projectPath = resolvedProjectPath
+        let savedUVPath = defaults.string(forKey: "uvPath")
+        if let savedUVPath, !Self.isSystemUVPath(savedUVPath) {
+            uvPath = savedUVPath
+        } else {
+            uvPath = Self.defaultUVPath(projectPath: resolvedProjectPath)
+        }
         vaultPath = defaults.string(forKey: "vaultPath") ?? defaultVault
+        zoteroStoragePath = defaults.string(forKey: "zoteroStoragePath") ?? Self.defaultZoteroStoragePath()
         localImportPath = defaults.string(forKey: "localImportPath") ?? ""
         localImportRecursive = defaults.object(forKey: "localImportRecursive") as? Bool ?? true
         localImportMaxDepth = defaults.string(forKey: "localImportMaxDepth") ?? ""
         localImportExcludeExistingZotero = defaults.object(forKey: "localImportExcludeExistingZotero") as? Bool ?? true
         localImportUseGemini = defaults.object(forKey: "localImportUseGemini") as? Bool ?? false
         localImportStopOnGeminiQuota = defaults.object(forKey: "localImportStopOnGeminiQuota") as? Bool ?? true
+        showTechnicalDetails = defaults.object(forKey: "showTechnicalDetails") as? Bool ?? false
         linkedAttachmentInstructionsShown = defaults.bool(forKey: "linkedAttachmentInstructionsShown")
         vaultStatus = VaultStatus(path: defaults.string(forKey: "vaultPath") ?? defaultVault)
         zoteroUserID = KeychainStore.read("ZOTERO_USER_ID")
@@ -340,6 +365,12 @@ final class AppState: ObservableObject {
         if defaults.object(forKey: "showPFWAcrossSpaces") != nil {
             showPFWAcrossSpaces = defaults.bool(forKey: "showPFWAcrossSpaces")
         }
+        let spacesDefaultMigrationApplied = defaults.bool(forKey: "pfwFollowsSpacesDefaultV1")
+        showPFWAcrossSpaces = ScreenPlacementPolicy.showAcrossSpacesValue(
+            currentValue: showPFWAcrossSpaces,
+            migrationApplied: spacesDefaultMigrationApplied
+        )
+        defaults.set(true, forKey: "pfwFollowsSpacesDefaultV1")
 
         if defaults.bool(forKey: "pfwP0DefaultsApplied") == false {
             dropShelfActivationMode = .keyboardShortcutOnly
@@ -347,13 +378,14 @@ final class AppState: ObservableObject {
             displayMode = .focusedMonitor
             focusedMonitorStrategy = .cursorScreen
             hotZoneEnabled = false
-            showPFWAcrossSpaces = false
+            showPFWAcrossSpaces = ScreenPlacementPolicy.showsAcrossSpacesByDefault
             autoHideAfterSuccess = false
             defaults.set(true, forKey: "pfwP0DefaultsApplied")
         }
 
         restoreZoteroVerification()
         suppressServiceCallbacks = false
+        refreshStatus()
     }
 
     var projectURL: URL {
@@ -368,9 +400,69 @@ final class AppState: ObservableObject {
         URL(fileURLWithPath: NSString(string: vaultPath).expandingTildeInPath)
     }
 
+    var vaultRootURL: URL {
+        vaultURL.deletingLastPathComponent()
+    }
+
+    var zoteroStorageURL: URL {
+        URL(fileURLWithPath: NSString(string: zoteroStoragePath).expandingTildeInPath)
+    }
+
+    var downloadsURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
+    }
+
     var logsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/PaperFlow", isDirectory: true)
+    }
+
+    func workflowStepState(
+        commandFragment: String,
+        prerequisiteGroups: [[String]] = [],
+        outputs: [String] = []
+    ) -> WorkflowStepState {
+        if runner.isRunning {
+            if runner.currentCommand.contains(commandFragment) {
+                return .running
+            }
+            return .blocked("Another PaperFlow command is running")
+        }
+
+        let missing = missingPrerequisiteGroups(prerequisiteGroups)
+        if !missing.isEmpty {
+            return .blocked("Complete the previous step first")
+        }
+
+        guard !outputs.isEmpty, outputs.allSatisfy(artifactExists) else {
+            return .ready
+        }
+
+        let newestInput = prerequisiteGroups
+            .flatMap { $0 }
+            .compactMap(artifactModificationDate)
+            .max()
+        let oldestOutput = outputs.compactMap(artifactModificationDate).min()
+        if let newestInput, let oldestOutput, newestInput > oldestOutput {
+            return .outdated("An input changed after this output was generated")
+        }
+        return .completed
+    }
+
+    func artifactExists(_ relativePath: String) -> Bool {
+        let url = projectURL.appendingPathComponent(relativePath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        if isDirectory.boolValue {
+            return !((try? FileManager.default.contentsOfDirectory(atPath: url.path).isEmpty) ?? true)
+        }
+        return true
+    }
+
+    func hasGeneratedArtifact(prefix: String, suffix: String) -> Bool {
+        latestFile(prefix: prefix, suffix: suffix) != nil
     }
 
     var redactedAPIKey: String {
@@ -387,12 +479,12 @@ final class AppState: ObservableObject {
 
     var zoteroConnectionStatus: String {
         if zoteroUserID.isEmpty || zoteroAPIKey.isEmpty {
-            return "Credentials not configured"
+            return "Setup required"
         }
         if !zoteroUserID.allSatisfy(\.isNumber) {
-            return "User ID must be numeric"
+            return "Account setup needs attention"
         }
-        return "Configured"
+        return "Ready"
     }
 
     var geminiConnectionStatus: String {
@@ -409,9 +501,50 @@ final class AppState: ObservableObject {
         runner.status.label
     }
 
+    var ingestApplyBlocker: String? {
+        guard !droppedPDFs.isEmpty else {
+            return "Drop at least one PDF first"
+        }
+        guard shelfStoreInLocalVault, shelfLinkToZoteroNoUpload else {
+            return "Keep PDFs on this Mac and link them to Zotero"
+        }
+        guard case .succeeded = runner.status,
+              runner.currentCommand.contains("paperflow ingest"),
+              runner.currentCommand.contains("--dry-run"),
+              dryRunIngestScope == currentIngestScope else {
+            return "Run Preview for these PDFs first"
+        }
+        return nil
+    }
+
+    var migrationApplyBlocker: String? {
+        guard zoteroVerification.writeAccess else {
+            return "Verify a Zotero API key with write access in Settings"
+        }
+        guard artifactExists("data/backups") else { return "Create a current Zotero backup first" }
+        guard artifactExists("data/migration_plan.json") else { return "Complete Plan Migration first" }
+        guard artifactExists("data/apply_preview.json") || artifactExists("data/apply_preview.md") else {
+            return "Complete Preview Migration first"
+        }
+        guard let planDate = artifactModificationDate("data/migration_plan.json"),
+              let previewDate = ["data/apply_preview.json", "data/apply_preview.md"]
+                .compactMap(artifactModificationDate)
+                .max(),
+              previewDate >= planDate else {
+            return "Run Preview Migration again because the plan changed"
+        }
+        guard let preview = readJSON(dataURL.appendingPathComponent("apply_preview.json")),
+              preview["collection_mode"] as? String == collectionMode.rawValue,
+              preview["tag_mode"] as? String == tagMode.rawValue else {
+            return "Run Preview Migration again because the organization settings changed"
+        }
+        return nil
+    }
+
     func refreshStatus() {
         refreshDashboard()
         refreshVaultStatus()
+        refreshStorageLocations()
         refreshGeminiUsage()
         refreshLocalImportStatus()
     }
@@ -517,18 +650,84 @@ final class AppState: ObservableObject {
         vaultStatus = status
     }
 
+    func refreshStorageLocations(scanDownloads: Bool = false) {
+        zoteroStorageStatus = folderLocationStatus(
+            name: "Zotero Storage",
+            url: zoteroStorageURL,
+            recursive: true
+        )
+        if scanDownloads {
+            downloadsStatus = folderLocationStatus(
+                name: "Downloads",
+                url: downloadsURL,
+                recursive: false
+            )
+        } else {
+            var status = FolderLocationStatus(name: "Downloads", path: downloadsURL.path)
+            var isDirectory: ObjCBool = false
+            status.exists = FileManager.default.fileExists(atPath: downloadsURL.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+            downloadsStatus = status
+        }
+    }
+
+    private func folderLocationStatus(name: String, url: URL, recursive: Bool) -> FolderLocationStatus {
+        var status = FolderLocationStatus(name: name, path: url.path)
+        var isDirectory: ObjCBool = false
+        status.exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+        guard status.exists else { return status }
+
+        status.isScanned = true
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey]
+        let files: [URL]
+        if recursive {
+            let enumerator = FileManager.default.enumerator(
+                at: url,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            )
+            var discovered: [URL] = []
+            if let enumerator {
+                for case let fileURL as URL in enumerator {
+                    discovered.append(fileURL)
+                }
+            }
+            files = discovered
+        } else {
+            files = (try? FileManager.default.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+        }
+
+        for file in files where file.pathExtension.caseInsensitiveCompare("pdf") == .orderedSame {
+            let values = try? file.resourceValues(forKeys: Set(keys))
+            guard values?.isRegularFile == true else { continue }
+            status.pdfCount += 1
+            status.totalBytes += UInt64(values?.fileSize ?? 0)
+        }
+        return status
+    }
+
     func addDroppedURLs(_ urls: [URL]) {
         invalidDropWarnings.removeAll()
         var existing = Set(droppedPDFs.map(\.url))
+        var addedPDF = false
         for url in urls {
             if url.pathExtension.lowercased() == "pdf" {
                 if !existing.contains(url) {
                     droppedPDFs.append(DroppedPDF(url: url))
                     existing.insert(url)
+                    addedPDF = true
                 }
             } else {
                 invalidDropWarnings.append("Ignored non-PDF: \(url.lastPathComponent)")
             }
+        }
+        if addedPDF {
+            dryRunIngestScope = []
         }
     }
 
@@ -536,10 +735,12 @@ final class AppState: ObservableObject {
         for index in offsets.sorted(by: >) {
             droppedPDFs.remove(at: index)
         }
+        dryRunIngestScope = []
     }
 
     func removePDF(_ pdf: DroppedPDF) {
         droppedPDFs.removeAll { $0.id == pdf.id }
+        dryRunIngestScope = []
         if droppedPDFs.isEmpty, dropShelfPhase != .processing {
             dropShelfPhase = .idleCompact
         }
@@ -548,6 +749,7 @@ final class AppState: ObservableObject {
     func clearPDFs() {
         droppedPDFs.removeAll()
         invalidDropWarnings.removeAll()
+        dryRunIngestScope = []
     }
 
     func chooseProjectDirectory() {
@@ -579,7 +781,20 @@ final class AppState: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.directoryURL = vaultURL
         if panel.runModal() == .OK, let url = panel.url {
-            vaultPath = url.path
+            vaultPath = url.lastPathComponent.caseInsensitiveCompare("Library") == .orderedSame
+                ? url.path
+                : url.appendingPathComponent("Library", isDirectory: true).path
+        }
+    }
+
+    func chooseZoteroStorageDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = zoteroStorageURL
+        if panel.runModal() == .OK, let url = panel.url {
+            zoteroStoragePath = url.path
         }
     }
 
@@ -594,6 +809,19 @@ final class AppState: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             localImportPath = url.path
         }
+    }
+
+    func scanDownloadsForImport() {
+        localImportPath = downloadsURL.path
+        selectedSection = .localFolderImport
+        refreshStorageLocations(scanDownloads: true)
+        runLocalFolderScan()
+    }
+
+    func openDownloadsImport() {
+        localImportPath = downloadsURL.path
+        selectedSection = .localFolderImport
+        refreshStorageLocations(scanDownloads: true)
     }
 
     func saveUnverifiedZoteroAPIKey() {
@@ -779,24 +1007,41 @@ final class AppState: ObservableObject {
     }
 
     func runEnrichMetadata() {
+        guard requirePrerequisites([["data/zotero_items.jsonl"]], action: "Enrich Metadata") else { return }
         runZotero(arguments: ["enrich-metadata"], timeoutSeconds: 1800)
     }
 
     func runDetectDuplicates() {
+        guard requirePrerequisites(
+            [["data/zotero_items_enriched.jsonl", "data/zotero_items.jsonl"]],
+            action: "Detect Duplicates"
+        ) else { return }
         runZotero(arguments: ["detect-duplicates"], timeoutSeconds: 1800)
     }
 
     func runPlanMigration() {
+        guard requirePrerequisites(
+            [["data/zotero_items_enriched.jsonl", "data/zotero_items.jsonl"]],
+            action: "Plan Migration"
+        ) else { return }
         runZotero(arguments: ["plan-migration"], timeoutSeconds: 1800)
     }
 
     func runDryRunMigration() {
-        runZotero(arguments: ["dry-run-migration"], timeoutSeconds: 1800)
+        guard requirePrerequisites([["data/migration_plan.json"]], action: "Dry Run Migration") else { return }
+        runZotero(
+            arguments: [
+                "dry-run-migration",
+                "--collection-mode", collectionMode.rawValue,
+                "--tag-mode", tagMode.rawValue
+            ],
+            timeoutSeconds: 1800
+        )
     }
 
     func runApplyMigration() {
-        guard zoteroVerification.writeAccess else {
-            invalidDropWarnings = ["Apply migration blocked: Zotero API key write access is missing or unverified."]
+        if let blocker = migrationApplyBlocker {
+            setUserWarning("Migration is not ready. Complete the highlighted step first.", technicalDetail: blocker)
             return
         }
         runZotero(
@@ -813,6 +1058,7 @@ final class AppState: ObservableObject {
     }
 
     func runCleanupDeleteEmpty() {
+        guard requirePrerequisites([["data/cleanup_report.md"]], action: "Cleanup Empty Collections") else { return }
         runZotero(
             arguments: [
                 "cleanup-collections",
@@ -827,35 +1073,37 @@ final class AppState: ObservableObject {
 
     func runDryRunIngest() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
         guard !droppedPDFs.isEmpty else {
             invalidDropWarnings = ["Drop at least one PDF first."]
             return
         }
+        dryRunIngestScope = currentIngestScope
         runUV(arguments: ingestArguments(apply: false, offlineFast: false), timeoutSeconds: 120)
     }
 
     func runDryRunIngestOfflineFast() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
         guard !droppedPDFs.isEmpty else {
             invalidDropWarnings = ["Drop at least one PDF first."]
             return
         }
+        dryRunIngestScope = currentIngestScope
         runUV(arguments: ingestArguments(apply: false, offlineFast: true), timeoutSeconds: 60)
     }
 
     func runApplyIngest() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
-        guard !droppedPDFs.isEmpty else {
-            invalidDropWarnings = ["Drop at least one PDF first."]
+        if let blocker = ingestApplyBlocker {
+            setUserWarning("Apply is not ready. Run a current Preview first.", technicalDetail: blocker)
             return
         }
         let args = ingestArguments(apply: true, offlineFast: false)
@@ -863,17 +1111,24 @@ final class AppState: ObservableObject {
     }
 
     func runVaultInit() {
-        runUV(arguments: ["run", "paperflow", "vault", "init"], timeoutSeconds: 600)
+        runUV(
+            arguments: ["run", "paperflow", "vault", "init", "--vault-root", vaultRootURL.path],
+            timeoutSeconds: 600
+        )
     }
 
     func runVaultPlanPaths() {
-        runUV(arguments: ["run", "paperflow", "vault", "plan-paths"], timeoutSeconds: 600)
+        guard requirePrerequisites([["data/migration_plan.json"]], action: "Plan Vault Paths") else { return }
+        runUV(
+            arguments: ["run", "paperflow", "vault", "plan-paths", "--vault-library", vaultURL.path],
+            timeoutSeconds: 600
+        )
     }
 
     func runLocalFolderScan() {
         let path = localImportPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
-            invalidDropWarnings = ["Choose a folder or enter a terminal path first."]
+            invalidDropWarnings = ["Choose a folder first."]
             return
         }
         var args = ["run", "paperflow", "local", "scan", path]
@@ -886,14 +1141,28 @@ final class AppState: ObservableObject {
     }
 
     func runLocalFolderMatchZotero() {
+        guard requirePrerequisites([["data/local_scan.json"]], action: "Match Zotero") else { return }
         if !localImportExcludeExistingZotero {
             invalidDropWarnings = ["Exclude existing Zotero items is off. Matching is still safe and recommended before import."]
         }
-        runUV(arguments: ["run", "paperflow", "local", "index-zotero"], timeoutSeconds: 1800)
-        runUV(arguments: ["run", "paperflow", "local", "match-zotero"], timeoutSeconds: 1800)
+        runUVSequence([
+            (["run", "paperflow", "local", "index-zotero"], 1800),
+            (["run", "paperflow", "local", "match-zotero"], 1800)
+        ])
+    }
+
+    func runIndexZoteroStorage() {
+        runUV(
+            arguments: ["run", "paperflow", "local", "index-zotero"],
+            timeoutSeconds: 1800
+        )
     }
 
     func runLocalFolderClassifyNew() {
+        guard requirePrerequisites(
+            [["data/local_scan.json"], ["data/local_zotero_match_plan.json"]],
+            action: "Classify New Papers"
+        ) else { return }
         var args = ["run", "paperflow", "local", "classify-new"]
         if localImportUseGemini {
             args += [
@@ -963,18 +1232,30 @@ final class AppState: ObservableObject {
                 }
             }
             try (content + rule).write(to: overridesURL, atomically: true, encoding: .utf8)
-            invalidDropWarnings = ["Saved taxonomy override rule to \(overridesURL.path). Re-running local classification."]
+            setUserWarning("Classification rule saved. Pending papers are being classified again.", technicalDetail: overridesURL.path)
             runLocalFolderClassifyNew()
         } catch {
-            invalidDropWarnings = ["Failed to save taxonomy override rule: \(error.localizedDescription)"]
+            setUserWarning("The classification rule could not be saved. Your existing library was not changed.", technicalDetail: error.localizedDescription)
         }
     }
 
     func runLocalFolderPlanImport() {
-        runUV(arguments: ["run", "paperflow", "local", "plan-import"], timeoutSeconds: 1800)
+        guard requirePrerequisites([["data/local_classification_plan.json"]], action: "Plan Import") else { return }
+        runUV(
+            arguments: [
+                "run", "paperflow", "local", "plan-import",
+                "--vault-library", vaultURL.path
+            ],
+            timeoutSeconds: 1800
+        )
     }
 
     func runApplyLocalImport() {
+        guard requirePrerequisites([["data/local_import_plan.json"]], action: "Apply Local Import") else { return }
+        guard zoteroVerification.writeAccess else {
+            invalidDropWarnings = ["Connect Zotero with write access in Settings before adding papers."]
+            return
+        }
         runUV(
             arguments: [
                 "run", "paperflow", "local", "apply-import",
@@ -987,14 +1268,29 @@ final class AppState: ObservableObject {
     }
 
     func runLocalFolderAuditImport() {
+        guard hasGeneratedArtifact(prefix: "local_import_apply_log_", suffix: ".json") else {
+            invalidDropWarnings = ["Add papers to Zotero before checking the import result."]
+            return
+        }
         runUV(arguments: ["run", "paperflow", "local", "audit-import"], timeoutSeconds: 1800)
     }
 
     func runPlanLocalizeAttachments() {
-        runZotero(arguments: ["plan-localize-attachments"], timeoutSeconds: 1800)
+        runZotero(
+            arguments: ["plan-localize-attachments", "--vault-library", vaultURL.path],
+            timeoutSeconds: 1800
+        )
     }
 
     func runApplyLocalizeAttachments() {
+        guard requirePrerequisites(
+            [["data/localize_attachments_plan.json"]],
+            action: "Apply Localize Attachments"
+        ) else { return }
+        guard zoteroVerification.writeAccess else {
+            invalidDropWarnings = ["Attachment localization requires verified Zotero write access."]
+            return
+        }
         runZotero(
             arguments: [
                 "apply-localize-attachments",
@@ -1007,10 +1303,22 @@ final class AppState: ObservableObject {
     }
 
     func runVerifyLocalizedAttachments() {
+        guard requirePrerequisites(
+            [["data/localize_attachments_plan.json"]],
+            action: "Verify Localized Attachments"
+        ) else { return }
+        guard hasGeneratedArtifact(prefix: "localize_apply_log_", suffix: ".json") else {
+            invalidDropWarnings = ["Move the planned attachments before running verification."]
+            return
+        }
         runZotero(arguments: ["verify-localized-attachments"], timeoutSeconds: 1800)
     }
 
     func runCleanupStoredAttachments() {
+        guard requirePrerequisites(
+            [["data/localize_attachments_plan.json"], ["data/localize_verify_report.json"]],
+            action: "Cleanup Stored Attachments"
+        ) else { return }
         runZotero(
             arguments: [
                 "cleanup-stored-attachments",
@@ -1142,7 +1450,7 @@ final class AppState: ObservableObject {
         case .applyIngest:
             runApplyIngest()
         case .addToZoteroInbox:
-            invalidDropWarnings = ["Backend missing: add-to-Zotero-Inbox ingest mode is not implemented yet."]
+            invalidDropWarnings = ["This import option is not available yet. Use Preview and Apply instead."]
             dropShelfPhase = .reviewNeeded
             shelfLastResult = "Add to Zotero Inbox requires a backend command."
         case .organizeWithAILibrary:
@@ -1177,6 +1485,12 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.open(vaultURL)
     }
 
+    func openFolder(path: String) {
+        let expanded = NSString(string: path).expandingTildeInPath
+        guard !expanded.isEmpty else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: expanded, isDirectory: true))
+    }
+
     func openLocalPDF(path: String) {
         let expanded = NSString(string: path).expandingTildeInPath
         guard !expanded.isEmpty else { return }
@@ -1193,7 +1507,7 @@ final class AppState: ObservableObject {
         let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty,
               let url = URL(string: "zotero://select/library/items/\(key)") else {
-            invalidDropWarnings = ["No matched Zotero item key for this row."]
+            invalidDropWarnings = ["This row is not linked to a Zotero item yet."]
             return
         }
         NSWorkspace.shared.open(url)
@@ -1228,11 +1542,29 @@ final class AppState: ObservableObject {
         timeoutSeconds: TimeInterval,
         destructive: Bool = false
     ) {
+        runner.run(makeUVSpec(
+            arguments: arguments,
+            timeoutSeconds: timeoutSeconds,
+            destructive: destructive
+        ))
+    }
+
+    private func runUVSequence(_ commands: [([String], TimeInterval)]) {
+        runner.runSequence(commands.map { command in
+            makeUVSpec(arguments: command.0, timeoutSeconds: command.1, destructive: false)
+        })
+    }
+
+    private func makeUVSpec(
+        arguments: [String],
+        timeoutSeconds: TimeInterval,
+        destructive: Bool
+    ) -> CommandSpec {
         let executable = NSString(string: uvPath).expandingTildeInPath
         let environment = commandEnvironment()
         let zoteroSecret = zoteroAPIKey.isEmpty ? (environment["ZOTERO_API_KEY"] ?? "") : zoteroAPIKey
         let geminiSecret = geminiAPIKey.isEmpty ? (environment["GEMINI_API_KEY"] ?? "") : geminiAPIKey
-        let spec = CommandSpec(
+        return CommandSpec(
             executable: executable,
             arguments: arguments,
             workingDirectory: projectURL,
@@ -1241,11 +1573,55 @@ final class AppState: ObservableObject {
             redactedSecrets: [zoteroSecret, geminiSecret],
             isDestructive: destructive
         )
-        runner.run(spec)
     }
 
     private func runMissingBackend(_ message: String) {
-        invalidDropWarnings = [message]
+        setUserWarning(
+            "This feature is unavailable. Open Advanced & Diagnostics in Settings for recovery details.",
+            technicalDetail: message
+        )
+    }
+
+    private func setUserWarning(_ summary: String, technicalDetail: String? = nil) {
+        if showTechnicalDetails, let technicalDetail, !technicalDetail.isEmpty {
+            invalidDropWarnings = ["\(summary)\n\(technicalDetail)"]
+        } else {
+            invalidDropWarnings = [summary]
+        }
+    }
+
+    private func requirePrerequisites(_ groups: [[String]], action: String) -> Bool {
+        let missing = missingPrerequisiteGroups(groups)
+        guard missing.isEmpty else {
+            setUserWarning(
+                "\(action) is not ready. Complete the previous step first.",
+                technicalDetail: "Missing \(missing.joined(separator: ", "))"
+            )
+            return false
+        }
+        return true
+    }
+
+    private func missingPrerequisiteGroups(_ groups: [[String]]) -> [String] {
+        groups.compactMap { group in
+            group.contains(where: artifactExists) ? nil : group.joined(separator: " or ")
+        }
+    }
+
+    private func artifactModificationDate(_ relativePath: String) -> Date? {
+        let url = projectURL.appendingPathComponent(relativePath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        if isDirectory.boolValue,
+           let children = try? FileManager.default.contentsOfDirectory(
+               at: url,
+               includingPropertiesForKeys: [.contentModificationDateKey]
+           ) {
+            return children.map(modificationDate).max() ?? modificationDate(url)
+        }
+        return modificationDate(url)
     }
 
     private func restoreZoteroVerification() {
@@ -1320,7 +1696,7 @@ final class AppState: ObservableObject {
             try data.write(to: usageURL)
             refreshGeminiUsage()
         } catch {
-            invalidDropWarnings = ["Could not write Gemini usage status: \(error.localizedDescription)"]
+            setUserWarning("Gemini usage status could not be saved. PaperFlow can continue without it.", technicalDetail: error.localizedDescription)
         }
     }
 
@@ -1377,6 +1753,20 @@ final class AppState: ObservableObject {
         ]
         let currentPath = environment["PATH"] ?? ""
         environment["PATH"] = (pathParts + [currentPath]).filter { !$0.isEmpty }.joined(separator: ":")
+        if let activeEnvironment = environment["VIRTUAL_ENV"], !activeEnvironment.isEmpty {
+            let activeBin = URL(fileURLWithPath: activeEnvironment).appendingPathComponent("bin").path
+            environment["PATH"] = environment["PATH"]?
+                .split(separator: ":")
+                .map(String.init)
+                .filter { $0 != activeBin }
+                .joined(separator: ":")
+        }
+        environment.removeValue(forKey: "VIRTUAL_ENV")
+        environment["UV_PROJECT_ENVIRONMENT"] = projectURL.appendingPathComponent(".venv").path
+        environment["UV_CACHE_DIR"] = projectURL.appendingPathComponent(".uv-cache").path
+        environment["UV_PYTHON_INSTALL_DIR"] = projectURL.appendingPathComponent(".uv-python").path
+        environment["UV_TOOL_DIR"] = projectURL.appendingPathComponent(".uv-tools").path
+        environment["UV_NO_ACTIVE_VENV"] = "1"
         if !zoteroUserID.isEmpty {
             environment["ZOTERO_USER_ID"] = zoteroUserID
         }
@@ -1396,6 +1786,7 @@ final class AppState: ObservableObject {
         args += [
             apply ? "--apply" : "--dry-run",
             "--storage-mode", "linked-local",
+            "--vault-library", vaultURL.path,
             "--progress-jsonl",
             "--verbose",
             "--total-timeout-seconds", apply ? "1800" : "60",
@@ -1408,6 +1799,16 @@ final class AppState: ObservableObject {
             args.append("--offline-fast")
         }
         return args
+    }
+
+    private var currentIngestScope: [String] {
+        droppedPDFs.map { pdf in
+            let url = pdf.url.standardizedFileURL
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            return "\(url.path)|\(values?.fileSize ?? -1)|\(modified)"
+        }
+        .sorted()
     }
 
     private func metadataRepairArguments(apply: Bool, itemKey: String? = nil) -> [String] {
@@ -1504,12 +1905,31 @@ final class AppState: ObservableObject {
         NSString(string: "~/Papers/Paperflow/Library").expandingTildeInPath
     }
 
-    private static func defaultUVPath() -> String {
+    private static func defaultZoteroStoragePath() -> String {
+        NSString(string: "~/Zotero/storage").expandingTildeInPath
+    }
+
+    private static func defaultUVPath(projectPath: String) -> String {
+        let projectWrapper = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent("bin/paperflow-uv")
+            .path
+        if FileManager.default.isExecutableFile(atPath: projectWrapper) {
+            return projectWrapper
+        }
         let candidates = [
             "/opt/homebrew/bin/uv",
             "/usr/local/bin/uv",
             NSString(string: "~/.local/bin/uv").expandingTildeInPath
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/opt/homebrew/bin/uv"
+    }
+
+    private static func isSystemUVPath(_ path: String) -> Bool {
+        let expanded = NSString(string: path).expandingTildeInPath
+        return [
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv",
+            NSString(string: "~/.local/bin/uv").expandingTildeInPath
+        ].contains(expanded)
     }
 }

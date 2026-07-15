@@ -13,12 +13,12 @@ struct PermissionStatus {
 enum PermissionManager {
     static func status(launchAtLogin: Bool) -> PermissionStatus {
         PermissionStatus(
-            filesAndFolders: "Uses selected project/vault folders. If a command fails, grant Files and Folders access in System Settings.",
+            filesAndFolders: "Uses only the PDF library and source folders you choose. If a file cannot be opened, allow Files and Folders access in System Settings.",
             accessibility: AXIsProcessTrusted()
-                ? "Granted"
-                : "Not granted. Needed only for frontmost-app window screen detection.",
-            inputMonitoring: "Not required for default Carbon global hotkeys.",
-            loginItem: launchAtLogin ? "Requested" : "Off"
+                ? "On"
+                : "Off. Enable only if you want PaperFlow to choose a screen from the frontmost window.",
+            inputMonitoring: "Not required for the default shortcuts.",
+            loginItem: launchAtLogin ? "On" : "Off"
         )
     }
 

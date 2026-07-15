@@ -105,8 +105,16 @@ def target_path_for_item(
 def zotero_linked_attachment_path(
     file_path: Path,
     vault_library: Path = DEFAULT_VAULT_LIBRARY,
+    *,
+    relative_to_base_directory: bool = False,
 ) -> str:
     expanded_file = file_path.expanduser().resolve(strict=False)
+    if not relative_to_base_directory:
+        # An ``attachments:`` path is only resolvable when Zotero's Linked
+        # Attachment Base Directory has already been configured to the exact
+        # same vault. An absolute path is a valid linked-file path without that
+        # hidden prerequisite and is therefore the safe default for applies.
+        return str(expanded_file)
     expanded_library = vault_library.expanduser().resolve(strict=False)
     try:
         relative = expanded_file.relative_to(expanded_library)

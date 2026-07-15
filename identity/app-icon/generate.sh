@@ -18,4 +18,3 @@ for size in 16 32 128 256 512; do
   magick "$SOURCE" -filter point -resize "${doubled}x${doubled}" "$ICONSET/icon_${size}x${size}@2x.png"
 done
 iconutil -c icns "$ICONSET" -o "$ICON_DIR/AppIcon.icns"
-

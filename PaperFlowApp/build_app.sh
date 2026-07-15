@@ -4,6 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$SCRIPT_DIR/.build/module-cache/clang}"
+export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$SCRIPT_DIR/.build/module-cache/swiftpm}"
+mkdir -p "$CLANG_MODULE_CACHE_PATH" "$SWIFTPM_MODULECACHE_OVERRIDE"
+
 swift build -c release
 
 APP_DIR="$SCRIPT_DIR/dist/PaperFlow.app"
@@ -20,6 +28,28 @@ GIT_COMMIT="$(git -C "$SCRIPT_DIR/.." rev-parse HEAD)"
 GIT_DIRTY=false
 if [[ -n "$(git -C "$SCRIPT_DIR/.." status --porcelain)" ]]; then
   GIT_DIRTY=true
+fi
+
+find_signing_identity() {
+  local identities identity
+  identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  identity="$(
+    printf '%s\n' "$identities" \
+      | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' \
+      | head -n 1
+  )"
+  if [[ -n "$identity" ]]; then
+    printf '%s\n' "$identity"
+    return
+  fi
+  printf '%s\n' "$identities" \
+    | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' \
+    | head -n 1
+}
+
+SIGNING_IDENTITY="${PAPERFLOW_SIGNING_IDENTITY:-${DEVELOPER_ID_APPLICATION:-}}"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$(find_signing_identity)"
 fi
 
 package_archives() {
@@ -78,7 +108,11 @@ if [[ "$SIGNING_MODE" == "release" && "$GIT_DIRTY" == "true" ]]; then
 fi
 if [[ "$SIGNING_MODE" == "release" ]]; then
   if [[ -z "${DEVELOPER_ID_APPLICATION:-}" ]]; then
-    DEVELOPER_ID_APPLICATION="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
+    if [[ "$SIGNING_IDENTITY" == Developer\ ID\ Application:* ]]; then
+      DEVELOPER_ID_APPLICATION="$SIGNING_IDENTITY"
+    else
+      DEVELOPER_ID_APPLICATION="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
+    fi
   fi
   if [[ -z "$DEVELOPER_ID_APPLICATION" ]]; then
     echo "A Developer ID Application identity is required for release builds." >&2
@@ -91,15 +125,13 @@ if [[ "$SIGNING_MODE" == "release" ]]; then
       echo "Refusing notarization with a non-Developer-ID signing identity." >&2
       exit 2
     fi
+    exit 2
   fi
   codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$DEVELOPER_ID_APPLICATION" "$APP_DIR"
   codesign --verify --deep --strict --verbose=2 "$APP_DIR"
   echo "Signed $APP_DIR with $DEVELOPER_ID_APPLICATION"
 else
-  LOCAL_SIGNING_IDENTITY="${LOCAL_SIGNING_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}"
-  if [[ -z "$LOCAL_SIGNING_IDENTITY" ]]; then
-    LOCAL_SIGNING_IDENTITY="${APPLE_DEVELOPMENT_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
-  fi
+  LOCAL_SIGNING_IDENTITY="${LOCAL_SIGNING_IDENTITY:-$SIGNING_IDENTITY}"
   if [[ -z "$LOCAL_SIGNING_IDENTITY" ]]; then
     if [[ "${ALLOW_AD_HOC_SIGNING:-0}" != "1" ]]; then
       echo "An Apple Development identity is required for a permission-stable local app." >&2
@@ -109,7 +141,11 @@ else
     codesign --force --sign - "$APP_DIR"
     echo "Ad-hoc signed $APP_DIR for an explicitly allowed packaging test."
   else
-    codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$LOCAL_SIGNING_IDENTITY" "$APP_DIR"
+    if [[ "$LOCAL_SIGNING_IDENTITY" == Developer\ ID\ Application:* ]]; then
+      codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$LOCAL_SIGNING_IDENTITY" "$APP_DIR"
+    else
+      codesign --force --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$LOCAL_SIGNING_IDENTITY" "$APP_DIR"
+    fi
     codesign --verify --deep --strict --verbose=2 "$APP_DIR"
     echo "Signed $APP_DIR with $LOCAL_SIGNING_IDENTITY"
   fi

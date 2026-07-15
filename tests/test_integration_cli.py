@@ -47,7 +47,7 @@ def test_version_and_status_are_single_versioned_json_values() -> None:
     assert version["schemaVersion"] == 1
     assert version["provider"] == {
         "id": "paperflow",
-        "version": "0.2.0",
+        "version": "0.2.2",
         "contractVersion": 1,
     }
     assert status["capability"] == "status"

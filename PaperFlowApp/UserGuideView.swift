@@ -9,7 +9,7 @@ struct UserGuideView: View {
                 title: "1. PaperFlow의 기본 원칙",
                 icon: "lock.shield",
                 text: """
-                PaperFlow는 로컬 우선 Zotero 논문 관리 앱입니다. PDF는 기본적으로 로컬 vault에 보관하고, Zotero에는 metadata, collection, tag, note, annotation, linked attachment만 유지합니다. Zotero Storage에 PDF를 업로드하지 않는 것이 기본 정책입니다.
+                PaperFlow는 Zotero 논문과 PDF를 안전하게 정리합니다. PDF는 기본적으로 이 Mac에 보관하며, Apply 전에 항상 변경 내용을 미리 확인할 수 있습니다.
                 """
             )
 
@@ -17,7 +17,7 @@ struct UserGuideView: View {
                 title: "2. Floating Window 열기",
                 icon: "tray.and.arrow.up",
                 text: """
-                PFW는 기본적으로 숨겨져 있습니다. Settings에서 선택한 단축키로 열고 닫습니다. 기본값은 ⌃⇧⌘+ 입니다. 메뉴바의 Shelf 버튼이나 메인 창 상단 Shelf 버튼도 같은 toggle 동작을 합니다.
+                Floating Window는 Settings에서 선택한 단축키로 열고 닫습니다. 기본값은 ⌃⇧⌘+이며, Desktop을 전환해도 함께 이동합니다.
                 """
             )
 
@@ -25,15 +25,15 @@ struct UserGuideView: View {
                 title: "3. 로컬 폴더 가져오기",
                 icon: "folder.badge.plus",
                 text: """
-                Local Folder Import에서 폴더를 선택한 뒤 Scan Folder → Match Zotero → Classify New Papers → Plan Import 순서로 실행합니다. Strong/likely duplicate는 기본 import에서 제외되고, possible duplicate/update candidate는 Review Queue로 갑니다.
+                Local Folder Import에서 폴더를 선택한 뒤 화면에 표시된 순서대로 Scan → Match → Classify → Preview를 실행합니다. 중복 가능성이 있거나 분류가 불확실한 논문은 바로 추가하지 않고 Review Queue로 보냅니다.
                 """
             )
 
             guideCard(
-                title: "4. 분류 수정",
+                title: "4. Review Queue와 분류 수정",
                 icon: "slider.horizontal.3",
                 text: """
-                Local Folder Import 테이블에서 Correct classification을 누르면 collection/tag를 고칠 수 있습니다. Save as Rule을 누르면 config/user_taxonomy_overrides.yaml에 사용자 규칙으로 저장되고, pending queue가 다시 분류됩니다.
+                보류된 결과 카드에는 이유와 다음 행동이 표시됩니다. Zotero에서 제목과 초록을 확인하고 가장 구체적인 collection을 선택하세요. Correct classification에서 수정한 뒤 Save as Rule을 누르면 같은 유형의 논문에도 재사용됩니다.
                 """
             )
 
@@ -41,15 +41,15 @@ struct UserGuideView: View {
                 title: "5. Zotero 정리",
                 icon: "books.vertical",
                 text: """
-                Zotero Organize는 Backup → Enrich Metadata → Detect Duplicates → Plan Migration → Dry Run Migration → Apply Migration 순서로 사용합니다. Apply는 반드시 REPLACE MY ZOTERO COLLECTIONS 입력이 필요하며, notes/highlights/annotations/attachments를 삭제하지 않아야 합니다.
+                Zotero Organize는 Backup → 서지정보 확인 → 중복 확인 → Plan → Preview → Apply 순서로 사용합니다. 현재 backup과 preview가 준비되면 Apply를 한 번 눌러 실행할 수 있으며, 메모와 읽기 기록은 보존됩니다.
                 """
             )
 
             guideCard(
-                title: "6. Golden Set 검증",
-                icon: "checkmark.seal",
+                title: "6. 기술 세부정보가 필요한 경우",
+                icon: "wrench.and.screwdriver",
                 text: """
-                분류기가 랜덤하게 변하지 않도록 data/golden_classifications.yaml을 사용합니다. CLI에서 uv run paperflow taxonomy evaluate를 실행하면 regression count를 확인할 수 있습니다. 새 기준 논문은 taxonomy add-golden으로 추가합니다.
+                일반 사용에는 경로, 명령, 로그가 필요하지 않습니다. 문제를 직접 확인해야 할 때만 Settings → Advanced & Diagnostics에서 Show technical details를 켜세요.
                 """
             )
         }

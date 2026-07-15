@@ -3,7 +3,7 @@
   "id": "paperflow",
   "displayName": "PaperFlow",
   "repository": "Gnaroshi/paperflow",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "platforms": ["macos"],
   "kind": "application",
   "bundleId": "com.paperflow.app",
@@ -19,7 +19,7 @@
     "app": {
       "bundleId": "com.paperflow.app",
       "displayName": "PaperFlow",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "discovery": "bundle-id"
     },
     "cli": {

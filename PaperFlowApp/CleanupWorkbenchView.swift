@@ -16,15 +16,25 @@ struct CleanupWorkbenchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                SectionTitle("Cleanup Workbench")
-                Spacer()
-                Button("Refresh") { reload() }
-                Button("Migration Audit") { state.runMigrationAudit() }
-                Button("Plan Duplicate Resolution") { state.runPlanDuplicateResolution() }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    SectionTitle("Review & Cleanup")
+                    Spacer()
+                    Button("Refresh") { reload() }
+                    Button("Check Library") { state.runMigrationAudit() }
+                    Button("Review Duplicates") { state.runPlanDuplicateResolution() }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionTitle("Review & Cleanup")
+                    FlowLayout(spacing: 8) {
+                        Button("Refresh") { reload() }
+                        Button("Check Library") { state.runMigrationAudit() }
+                        Button("Review Duplicates") { state.runPlanDuplicateResolution() }
+                    }
+                }
             }
 
-            WarningBox(text: "Cleanup is review-first. PaperFlow never deletes notes, highlights, annotations, child notes, parent items, or attachments from this workbench.")
+            WarningBox(text: "Review comes first. This screen does not automatically delete papers, PDFs, notes, highlights, or annotations.")
 
             summaryTiles
 
@@ -73,11 +83,14 @@ struct CleanupWorkbenchView: View {
 
     private var summaryTiles: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
-            InfoTile(title: "Missing Abstract", value: "\(data.missingAbstract.count)")
-            InfoTile(title: "Missing Metadata", value: "\(data.missingMetadata.count)")
-            InfoTile(title: "Duplicate Groups", value: "\(data.duplicateGroups.count)")
-            InfoTile(title: "Low Confidence", value: "\(data.lowConfidence.count)")
-            InfoTile(title: "Non-paper", value: "\(data.nonPaper.count)")
+            if data.missingAbstract.count > 0 { InfoTile(title: "Missing Abstract", value: "\(data.missingAbstract.count)") }
+            if data.missingMetadata.count > 0 { InfoTile(title: "Missing Metadata", value: "\(data.missingMetadata.count)") }
+            if data.duplicateGroups.count > 0 { InfoTile(title: "Duplicate Groups", value: "\(data.duplicateGroups.count)") }
+            if data.lowConfidence.count > 0 { InfoTile(title: "Low Confidence", value: "\(data.lowConfidence.count)") }
+            if data.nonPaper.count > 0 { InfoTile(title: "Non-paper", value: "\(data.nonPaper.count)") }
+            if data.missingAbstract.isEmpty && data.missingMetadata.isEmpty && data.duplicateGroups.isEmpty && data.lowConfidence.isEmpty && data.nonPaper.isEmpty {
+                InfoTile(title: "Library review", value: "Nothing needs attention")
+            }
         }
     }
 
@@ -85,46 +98,68 @@ struct CleanupWorkbenchView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Where did this paper go?")
                 .font(.headline)
-            HStack {
-                TextField("Search title, DOI, arXiv ID, or item key", text: $explainQuery)
-                    .paperFlowTextInput()
-                Button("Explain via CLI") {
-                    if let first = explainedItems.first {
-                        state.runExplainItem(first.itemKey)
-                    } else {
-                        state.invalidDropWarnings = ["No matching item found in data/migration_plan.json."]
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    explainField
+                    explainButton
                 }
-                .disabled(explainedItems.isEmpty)
+                VStack(alignment: .leading, spacing: 8) {
+                    explainField
+                    explainButton
+                }
             }
             ForEach(explainedItems.prefix(explainQuery.isEmpty ? 0 : 5)) { item in
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(item.title)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Text(item.itemKey)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(PaperFlowTheme.muted)
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text(item.title)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            if state.showTechnicalDetails { itemKey(item.itemKey) }
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .fontWeight(.semibold)
+                            if state.showTechnicalDetails { itemKey(item.itemKey) }
+                        }
                     }
                     WorkbenchFlowRow(label: "Before", values: item.currentCollections)
                     WorkbenchFlowRow(label: "After", values: item.plannedCollections)
                     WorkbenchFlowRow(label: "Tags", values: item.normalizedTags)
                     Text("Why: \(item.rationale)")
                         .foregroundStyle(PaperFlowTheme.muted)
-                    HStack {
+                    FlowLayout(spacing: 8) {
                         Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                         Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                             .disabled(item.localPDFPaths.isEmpty)
-                        Button("Undo this item") {
-                            state.invalidDropWarnings = ["Backend command missing: per-item rollback is not implemented. Use uv run paperflow zotero rollback with a backup for full rollback."]
-                        }
                     }
                 }
                 .padding(10)
                 .paperFlowCard(tint: PaperFlowTheme.sky, radius: 12)
             }
         }
+    }
+
+    private var explainField: some View {
+        TextField(state.showTechnicalDetails ? "Search title, DOI, arXiv ID, or item key" : "Search title, DOI, or arXiv ID", text: $explainQuery)
+            .paperFlowTextInput()
+    }
+
+    private var explainButton: some View {
+        Button("Explain") {
+            if let first = explainedItems.first {
+                state.runExplainItem(first.itemKey)
+            } else {
+                state.invalidDropWarnings = ["No matching paper was found in the current review results."]
+            }
+        }
+        .disabled(explainedItems.isEmpty)
+    }
+
+    private func itemKey(_ value: String) -> some View {
+        Text(value)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(PaperFlowTheme.muted)
     }
 
     private func reload() {
@@ -174,6 +209,7 @@ struct CleanupWorkbenchView: View {
 }
 
 private struct MissingAbstractPane: View {
+    @EnvironmentObject private var state: AppState
     let items: [CleanupWorkbenchItem]
     @Binding var selectedItemKey: String
     let repairSelected: () -> Void
@@ -183,18 +219,18 @@ private struct MissingAbstractPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("Selected", selection: $selectedItemKey) {
-                    Text("None").tag("")
-                    ForEach(items) { item in
-                        Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
-                    }
+            Picker("Selected", selection: $selectedItemKey) {
+                Text("None").tag("")
+                ForEach(items) { item in
+                    Text(state.showTechnicalDetails ? "\(item.title) (\(item.itemKey))" : item.title).tag(item.itemKey)
                 }
-                .frame(maxWidth: 420)
+            }
+            .frame(maxWidth: 520)
+            FlowLayout(spacing: 8) {
                 Button("Repair Selected") { repairSelected() }
                 Button("Repair All Dry Run") { repairAllDryRun() }
                 Button("Apply Selected Repairs") { applySelected() }
-                Button(role: .destructive) { applyAll() } label: {
+                Button { applyAll() } label: {
                     Text("Apply All High-confidence")
                 }
             }
@@ -208,7 +244,7 @@ private struct MissingAbstractPane: View {
                                 Text("Before")
                                     .font(.caption)
                                     .foregroundStyle(PaperFlowTheme.muted)
-                                Text(item.currentAbstract.isEmpty ? "Missing in Zotero abstractNote" : item.currentAbstract)
+                                Text(item.currentAbstract.isEmpty ? "Missing in Zotero" : item.currentAbstract)
                                     .lineLimit(5)
                                     .textSelection(.enabled)
                                 Text("After")
@@ -230,6 +266,7 @@ private struct MissingAbstractPane: View {
 }
 
 private struct MissingMetadataPane: View {
+    @EnvironmentObject private var state: AppState
     let items: [CleanupWorkbenchItem]
     @Binding var selectedItemKey: String
     @Binding var approvedFields: [String: Set<String>]
@@ -240,18 +277,18 @@ private struct MissingMetadataPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("Selected", selection: $selectedItemKey) {
-                    Text("None").tag("")
-                    ForEach(items) { item in
-                        Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
-                    }
+            Picker("Selected", selection: $selectedItemKey) {
+                Text("None").tag("")
+                ForEach(items) { item in
+                    Text(state.showTechnicalDetails ? "\(item.title) (\(item.itemKey))" : item.title).tag(item.itemKey)
                 }
-                .frame(maxWidth: 420)
+            }
+            .frame(maxWidth: 520)
+            FlowLayout(spacing: 8) {
                 Button("Repair Selected") { repairSelected() }
                 Button("Repair All Dry Run") { repairAllDryRun() }
                 Button("Apply Selected Repairs") { applySelected() }
-                Button(role: .destructive) { applyAll() } label: {
+                Button { applyAll() } label: {
                     Text("Apply All Approved")
                 }
             }
@@ -296,7 +333,7 @@ private struct MissingMetadataPane: View {
                                             )
                                         }
                                     }
-                                    Text("Apply Selected Repairs sends only approved fields to the backend.")
+                                    Text("Only approved fields will be changed.")
                                         .font(.caption)
                                         .foregroundStyle(PaperFlowTheme.muted)
                                 }
@@ -311,6 +348,7 @@ private struct MissingMetadataPane: View {
 }
 
 private struct DuplicateCandidatesPane: View {
+    @EnvironmentObject private var state: AppState
     let groups: [DuplicateWorkbenchGroup]
 
     var body: some View {
@@ -326,11 +364,15 @@ private struct DuplicateCandidatesPane: View {
                                 .font(.caption)
                                 .foregroundStyle(PaperFlowTheme.muted)
                         }
-                        StatusLine(label: "Canonical", value: group.canonicalItemKey)
+                        if state.showTechnicalDetails {
+                            StatusLine(label: "Canonical item key", value: group.canonicalItemKey)
+                        }
                         StatusLine(label: "Canonical reason", value: group.canonicalReason.isEmpty ? "(not provided)" : group.canonicalReason)
                         StatusLine(label: "Recommended", value: group.recommendedAction)
                         if group.metadataMergeSuggested {
-                            WarningBox(text: "Metadata merge suggested from \(group.suggestedMetadataSourceItemKey). Keep reading work on the canonical item.")
+                            WarningBox(text: state.showTechnicalDetails
+                                ? "Metadata merge suggested from \(group.suggestedMetadataSourceItemKey). Keep reading work on the canonical item."
+                                : "Metadata from another copy may be useful. Keep reading work on the canonical paper.")
                         }
                         ForEach(group.items) { item in
                             DuplicateItemCard(item: item)
@@ -377,9 +419,11 @@ private struct CleanupItemCard<Extra: View>: View {
                 Text(item.title)
                     .font(.headline)
                 Spacer()
-                Text(item.itemKey)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(PaperFlowTheme.muted)
+                if state.showTechnicalDetails {
+                    Text(item.itemKey)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(PaperFlowTheme.muted)
+                }
             }
             WorkbenchFlowRow(label: "Current Zotero collections", values: item.currentCollections)
             WorkbenchFlowRow(label: "Planned target collections", values: item.plannedCollections)
@@ -405,16 +449,13 @@ private struct CleanupItemCard<Extra: View>: View {
             Text("Rationale: \(item.rationale)")
                 .foregroundStyle(PaperFlowTheme.muted)
             extra
-            HStack {
+            FlowLayout(spacing: 8) {
                 Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                 Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                     .disabled(item.localPDFPaths.isEmpty)
                 Button("Explain item") { state.runExplainItem(item.itemKey) }
                 Button("Repair metadata") { state.runRepairMetadataDryRun(itemKey: item.itemKey) }
                 Button("Repair abstract") { state.runRepairAbstractDryRun(itemKey: item.itemKey) }
-                Button("Mark reviewed") {
-                    state.invalidDropWarnings = ["Backend command missing: cleanup review state persistence for \(item.itemKey)."]
-                }
             }
         }
         .padding(12)
@@ -454,9 +495,11 @@ private struct DuplicateItemCard: View {
                         .clipShape(Capsule())
                 }
                 Spacer()
-                Text(item.itemKey)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(PaperFlowTheme.muted)
+                if state.showTechnicalDetails {
+                    Text(item.itemKey)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(PaperFlowTheme.muted)
+                }
             }
             WorkbenchFlowRow(label: "Before", values: item.currentCollections)
             WorkbenchFlowRow(label: "After", values: item.plannedCollections)
@@ -473,26 +516,10 @@ private struct DuplicateItemCard: View {
                 SmallFact(label: "Comments", value: "\(item.commentCount)")
                 SmallFact(label: "PDFs", value: item.pdfStatus)
             }
-            HStack {
-                Button("Keep canonical") {
-                    state.invalidDropWarnings = ["Review action recorded only in your head for now. Backend command missing: duplicate review state persistence."]
-                }
-                .disabled(!item.isCanonical)
+            FlowLayout(spacing: 8) {
                 Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                 Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                     .disabled(item.localPDFPaths.isEmpty)
-                Button("Copy metadata to canonical") {
-                    state.invalidDropWarnings = ["Backend command missing: copy selected metadata from duplicate to canonical."]
-                }
-                Button("Move to Quarantine") {
-                    state.invalidDropWarnings = ["Backend command missing: move duplicate to Quarantine collection."]
-                }
-                Button(role: .destructive) {
-                    state.invalidDropWarnings = ["Deletion is intentionally not implemented in the app yet. Backend must first prove no reading work and pass attachment safety checks, then require DELETE DUPLICATE ITEM."]
-                } label: {
-                    Text("Delete Duplicate")
-                }
-                .disabled(item.unsafeToDelete || item.isCanonical)
             }
         }
         .padding(10)

@@ -3,6 +3,10 @@
 
 # Python
 .venv/
+.uv-cache/
+.uv-python/
+.uv-tools/
+.paperflow/
 __pycache__/
 *.py[cod]
 .pytest_cache/
