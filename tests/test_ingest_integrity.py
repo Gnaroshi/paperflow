@@ -4,6 +4,8 @@ from typing import Any
 from paperflow.ingest import (
     _find_existing_parent,
     _matching_existing_parent_keys,
+    _merged_ingest_collection_keys,
+    _merged_ingest_tags,
     apply_ingest_plan,
     classify_ingest_metadata,
     ingest_review_guidance,
@@ -102,6 +104,37 @@ def test_existing_parent_match_normalizes_arxiv_versions_and_is_deterministic() 
 
     assert matches == ["OLDER", "NEWER"]
     assert key == "OLDER"
+
+
+def test_existing_user_membership_and_reading_status_survive_reclassification() -> None:
+    collections = _merged_ingest_collection_keys(
+        ["MANUAL", "OLD_AREA", "AMBIGUOUS"],
+        ["NEW_AREA"],
+        {
+            "AI Library/20 Areas/Old/Topic": "OLD_AREA",
+            "AI Library/20 Areas/New/Topic": "NEW_AREA",
+            AMBIGUOUS_CLASSIFICATION_COLLECTION: "AMBIGUOUS",
+        },
+    )
+    tags = _merged_ingest_tags(
+        [
+            {"tag": "Computer Science - Robotics"},
+            {"tag": "status/reading"},
+            {"tag": "area/old"},
+            {"tag": "status/review-needed"},
+            {"tag": "cleanup/low-confidence"},
+        ],
+        ["status/to-read", "source/arxiv", "area/new", "type/benchmark"],
+    )
+
+    assert collections == ["MANUAL", "NEW_AREA"]
+    assert [tag["tag"] for tag in tags] == [
+        "Computer Science - Robotics",
+        "status/reading",
+        "source/arxiv",
+        "area/new",
+        "type/benchmark",
+    ]
 
 
 class _Response:
@@ -209,3 +242,57 @@ def test_repeated_apply_reuses_parent_and_attachment_and_repairs_legacy_path(
     assert any(event["event"] == "linked-attachment-path-repaired" for event in first_events)
     assert any(event["event"] == "linked-attachment-reused" for event in second_events)
     assert plan["items"][0]["zotero"]["operation"] == "update"
+
+
+class _StoredAttachmentClient(_IdempotentClient):
+    def get_item_children(self, _: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "key": "STORED",
+                "data": {
+                    "itemType": "attachment",
+                    "linkMode": "imported_file",
+                    "contentType": "application/pdf",
+                    "filename": "paper.pdf",
+                },
+            }
+        ]
+
+
+def test_apply_preserves_single_stored_pdf_instead_of_creating_second_attachment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"paper")
+    vault = tmp_path / "Library"
+    target = vault / "2026" / "paper.pdf"
+    client = _StoredAttachmentClient("")
+    monkeypatch.setattr("paperflow.ingest.ZoteroWebClient", lambda **_: client)
+    plan = {
+        "vault_library": str(vault),
+        "items": [
+            {
+                "source_path": str(source),
+                "source_sha256": sha256_file(source),
+                "target_path": str(target),
+                "title": "Paper",
+                "year": 2026,
+                "arxiv_id": "2602.18397v1",
+                "planned_collections": [],
+                "planned_tags": ["status/to-read"],
+            }
+        ],
+    }
+
+    events = apply_ingest_plan(plan, user_id="1", api_key="key")
+
+    assert client.post_item_calls == []
+    assert any(event["event"] == "stored-pdf-attachment-preserved" for event in events)
+    action = next(
+        action
+        for action in plan["items"][0]["actions"]
+        if action["name"] == "create_linked_attachment"
+    )
+    assert action["attachment_key"] == "STORED"
+    assert action["link_mode"] == "imported_file"

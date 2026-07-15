@@ -1140,6 +1140,7 @@ def _item_arxiv_id(raw_item: dict[str, Any]) -> str | None:
 def _matching_existing_parent_keys(
     client: ZoteroWebClient,
     plan_item: dict[str, Any],
+    top_items: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     doi = plan_item.get("doi_normalized")
     arxiv_id = normalize_arxiv_id(plan_item.get("arxiv_id"))
@@ -1148,7 +1149,7 @@ def _matching_existing_parent_keys(
     if not doi and not arxiv_id and not normalized_title:
         return []
     matches: list[tuple[int, str, str]] = []
-    for raw_item in client.iter_top_items():
+    for raw_item in top_items if top_items is not None else client.iter_top_items():
         data = raw_item.get("data", {})
         key = str(raw_item.get("key") or data.get("key") or "")
         if not key:
@@ -1177,7 +1178,50 @@ def _find_existing_parent(client: ZoteroWebClient, plan_item: dict[str, Any]) ->
     return matches[0] if matches else None
 
 
-def _find_existing_linked_attachment(
+def _merged_ingest_collection_keys(
+    existing_keys: list[str],
+    planned_keys: list[str],
+    key_by_path: dict[str, str],
+) -> list[str]:
+    managed_keys = {
+        key
+        for path, key in key_by_path.items()
+        if path.startswith("AI Library/20 Areas/")
+        or path == AMBIGUOUS_CLASSIFICATION_COLLECTION
+    }
+    preserved = [key for key in existing_keys if key not in managed_keys]
+    return list(dict.fromkeys([*preserved, *planned_keys]))
+
+
+def _merged_ingest_tags(
+    existing_tags: list[dict[str, Any]],
+    planned_tags: list[str],
+) -> list[dict[str, str]]:
+    existing_names = [
+        str(tag.get("tag") or "").strip()
+        for tag in existing_tags
+        if str(tag.get("tag") or "").strip()
+    ]
+    has_active_status = any(
+        tag.startswith("status/") and tag not in {"status/review-needed", "status/to-read"}
+        for tag in existing_names
+    )
+    managed_prefixes = ("area/", "method/", "type/", "source/")
+    managed_exact = {"status/review-needed", "cleanup/low-confidence"}
+    preserved = [
+        tag
+        for tag in existing_names
+        if not tag.startswith(managed_prefixes) and tag not in managed_exact
+    ]
+    additions = [
+        tag
+        for tag in planned_tags
+        if not (has_active_status and tag == "status/to-read")
+    ]
+    return [{"tag": tag} for tag in dict.fromkeys([*preserved, *additions])]
+
+
+def _find_existing_pdf_attachment(
     client: ZoteroWebClient,
     parent_key: str,
     pdf_path: Path,
@@ -1190,15 +1234,20 @@ def _find_existing_linked_attachment(
         relative_to_base_directory=True,
     )
     matching_paths = {absolute_path, legacy_relative_path}
+    stored_pdf_attachments: list[dict[str, Any]] = []
     for child in client.get_item_children(parent_key):
         data = child.get("data", {})
         if data.get("itemType") != "attachment":
             continue
-        if data.get("linkMode") not in {"linked_file", 2}:
-            continue
-        if data.get("path") in matching_paths:
+        link_mode = data.get("linkMode")
+        if link_mode in {"linked_file", 2} and data.get("path") in matching_paths:
             return child
-    return None
+        filename = str(data.get("filename") or "")
+        if link_mode in {"imported_file", "imported_url", 0, 1} and (
+            data.get("contentType") == "application/pdf" or filename.lower().endswith(".pdf")
+        ):
+            stored_pdf_attachments.append(child)
+    return stored_pdf_attachments[0] if len(stored_pdf_attachments) == 1 else None
 
 
 def _created_key(response_json: dict[str, Any], index: int = 0) -> str:
@@ -1285,6 +1334,7 @@ def apply_ingest_plan(
     events: list[dict[str, Any]] = []
     vault_library = Path(plan["vault_library"]).expanduser()
     with ZoteroWebClient(user_id=user_id, api_key=api_key) as client:
+        top_items = client.iter_top_items()
         collection_paths = list(
             dict.fromkeys(
                 path
@@ -1324,7 +1374,11 @@ def apply_ingest_plan(
                 }
             )
 
-            matching_parent_keys = _matching_existing_parent_keys(client, item)
+            matching_parent_keys = _matching_existing_parent_keys(
+                client,
+                item,
+                top_items=top_items,
+            )
             parent_key = matching_parent_keys[0] if matching_parent_keys else None
             duplicate_parent_keys = matching_parent_keys[1:]
             parent_existed = bool(parent_key)
@@ -1332,13 +1386,28 @@ def apply_ingest_plan(
             item_body = _parent_body(item)
             item_body["collections"] = collection_keys
             if parent_key:
+                existing_parent = next(
+                    raw for raw in top_items if (raw.get("key") or raw.get("data", {}).get("key")) == parent_key
+                )
+                existing_data = existing_parent.get("data", {})
+                merged_collection_keys = _merged_ingest_collection_keys(
+                    existing_data.get("collections") or [],
+                    collection_keys,
+                    key_by_path,
+                )
+                merged_tags = _merged_ingest_tags(
+                    existing_data.get("tags") or [],
+                    item.get("planned_tags") or item.get("normalized_tags") or [],
+                )
                 response = client.patch_item(
                     parent_key,
                     {
-                        "collections": collection_keys,
-                        "tags": item_body["tags"],
+                        "collections": merged_collection_keys,
+                        "tags": merged_tags,
                     },
                 )
+                existing_data["collections"] = merged_collection_keys
+                existing_data["tags"] = merged_tags
                 events.append(
                     {
                         "event": "parent-item-updated",
@@ -1349,6 +1418,7 @@ def apply_ingest_plan(
             else:
                 response = client.post_items([item_body])
                 parent_key = _created_key(response.json())
+                top_items.append({"key": parent_key, "data": item_body})
                 events.append(
                     {
                         "event": "parent-item-created",
@@ -1409,7 +1479,7 @@ def apply_ingest_plan(
                 title=item["title"],
                 vault_library=vault_library,
             )
-            existing_attachment = _find_existing_linked_attachment(
+            existing_attachment = _find_existing_pdf_attachment(
                 client,
                 parent_key,
                 target,
@@ -1417,14 +1487,16 @@ def apply_ingest_plan(
             )
             attachment_reused = existing_attachment is not None
             attachment_path_repaired = False
+            attachment_link_mode = "linked_file"
             if existing_attachment is not None:
                 attachment_data = existing_attachment.get("data", {})
+                attachment_link_mode = str(attachment_data.get("linkMode") or "linked_file")
                 attachment_key = str(
                     existing_attachment.get("key") or attachment_data.get("key") or ""
                 )
                 if not attachment_key:
                     raise ValueError("Existing Zotero attachment has no item key.")
-                if attachment_data.get("path") != desired_attachment["path"]:
+                if attachment_data.get("linkMode") in {"linked_file", 2} and attachment_data.get("path") != desired_attachment["path"]:
                     response = client.patch_item(
                         attachment_key,
                         {"path": desired_attachment["path"]},
@@ -1439,13 +1511,26 @@ def apply_ingest_plan(
                             "statusCode": response.status_code,
                         }
                     )
-                else:
+                elif attachment_data.get("linkMode") in {"linked_file", 2}:
                     events.append(
                         {
                             "event": "linked-attachment-reused",
                             "parentItemKey": parent_key,
                             "attachmentKey": attachment_key,
                             "path": desired_attachment["path"],
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "event": "stored-pdf-attachment-preserved",
+                            "parentItemKey": parent_key,
+                            "attachmentKey": attachment_key,
+                            "linkMode": attachment_link_mode,
+                            "nextAction": (
+                                "No second attachment was created because this parent already has "
+                                "one stored PDF attachment. Existing reading work was preserved."
+                            ),
                         }
                     )
             else:
@@ -1460,6 +1545,7 @@ def apply_ingest_plan(
                 linked_pdf_path=str(target),
                 reused=attachment_reused,
                 path_repaired=attachment_path_repaired,
+                link_mode=attachment_link_mode,
             )
             if not attachment_reused:
                 events.append(
