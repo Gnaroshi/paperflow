@@ -6,7 +6,7 @@ import httpx
 from typer.testing import CliRunner
 
 from paperflow.cli import app
-from paperflow.ingest import ProgressEmitter, build_ingest_plan
+from paperflow.ingest import ProgressEmitter, _parse_arxiv_atom, build_ingest_plan, fetch_arxiv_metadata
 
 
 LOOPED_WORLD_MODELS_FIRST_PAGE = """
@@ -97,6 +97,48 @@ def test_network_timeout_error_continues_without_hanging(tmp_path: Path, monkeyp
 
     assert time.monotonic() - started < 2
     assert plan["items"][0]["title"] == "Looped World Models"
+
+
+def test_arxiv_atom_parser_uses_entry_title_not_feed_title() -> None:
+    payload = _parse_arxiv_atom(
+        """<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>arXiv Query: search_query=&amp;id_list=2606.18208</title>
+          <entry>
+            <title>Looped World Models</title>
+            <summary>We introduce looped architectures for world modelling.</summary>
+            <published>2026-06-16T00:00:00Z</published>
+          </entry>
+        </feed>"""
+    )
+
+    assert payload == {
+        "title": "Looped World Models",
+        "abstract": "We introduce looped architectures for world modelling.",
+        "year": 2026,
+    }
+
+
+def test_cached_arxiv_feed_title_is_rejected(tmp_path: Path) -> None:
+    cache_file = tmp_path / "arxiv" / "2606.18208v1.json"
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_text(
+        json.dumps(
+            {
+                "metadata_source": "arxiv",
+                "title": "arXiv Query: search_query=&amp;id_list=2606.18208",
+                "abstract": "A real abstract.",
+                "year": 2026,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metadata = fetch_arxiv_metadata("2606.18208v1", cache_dir=tmp_path)
+
+    assert metadata["cache_hit"] is True
+    assert metadata["title"] is None
+    assert metadata["abstract"] == "A real abstract."
 
 
 def test_looped_world_models_single_pdf_expected_dry_run(tmp_path: Path, monkeypatch) -> None:

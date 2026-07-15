@@ -6,7 +6,6 @@ struct CommandPaletteView: View {
 
     @State private var query = ""
     @State private var selectedID = "dry-run-migration"
-    @State private var confirmation = ""
     @FocusState private var searchFocused: Bool
 
     private var actions: [PaletteAction] {
@@ -42,7 +41,13 @@ struct CommandPaletteView: View {
             PaletteAction(id: "migration-audit", title: "Migration Audit", subtitle: "uv run paperflow zotero migration-audit", destructive: false) {
                 state.runMigrationAudit()
             },
-            PaletteAction(id: "apply-migration", title: "Apply Migration", subtitle: "Requires typed confirmation", destructive: true) {
+            PaletteAction(
+                id: "apply-migration",
+                title: "Apply Reviewed Migration",
+                subtitle: state.migrationApplyBlocker.map { "Blocked: \($0)" }
+                    ?? "Backup and current dry-run preview verified",
+                destructive: true
+            ) {
                 state.runApplyMigration()
             },
             PaletteAction(id: "latest-report", title: "Open Latest Report", subtitle: "Open latest apply log or reports folder", destructive: false) {
@@ -92,10 +97,11 @@ struct CommandPaletteView: View {
                     ForEach(filteredActions) { action in
                         Button {
                             selectedID = action.id
-                            if !action.destructive {
-                                action.run()
-                                onClose()
+                            if action.id == "apply-migration", state.migrationApplyBlocker != nil {
+                                return
                             }
+                            action.run()
+                            onClose()
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -126,21 +132,17 @@ struct CommandPaletteView: View {
                 .padding(10)
             }
 
-            if selectedAction?.destructive == true {
-                softSeparator
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Apply Migration requires confirmation")
-                        .font(.caption)
-                        .foregroundStyle(PaperFlowTheme.muted)
-                    TextField("REPLACE MY ZOTERO COLLECTIONS", text: $confirmation)
-                        .paperFlowTextInput()
-                }
-                .padding(12)
-            }
-
             softSeparator
+            if selectedID == "apply-migration", let blocker = state.migrationApplyBlocker {
+                Label(blocker, systemImage: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(PaperFlowTheme.rose)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+            }
             HStack {
-                Text("Enter runs selected dry-run action. Escape closes.")
+                Text("Enter runs the selected action. Apply stays blocked without a backup and current preview.")
                     .font(.caption)
                     .foregroundStyle(PaperFlowTheme.muted)
                 Spacer()
@@ -167,10 +169,8 @@ struct CommandPaletteView: View {
         guard let action = selectedAction else {
             return
         }
-        if action.destructive {
-            guard confirmation == ConfirmationKind.applyMigration.requiredText else {
-                return
-            }
+        if action.id == "apply-migration", state.migrationApplyBlocker != nil {
+            return
         }
         action.run()
         onClose()
@@ -183,23 +183,11 @@ struct CommandPaletteView: View {
     }
 
     private var commandBackground: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    PaperFlowTheme.canvas0,
-                    PaperFlowTheme.panel0,
-                    PaperFlowTheme.panel2
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [PaperFlowTheme.lilac.opacity(0.20), .clear],
-                center: .topTrailing,
-                startRadius: 12,
-                endRadius: 420
-            )
-        }
+        LinearGradient(
+            colors: [PaperFlowTheme.canvas0, PaperFlowTheme.panel0],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 

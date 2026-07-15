@@ -6,6 +6,7 @@ import re
 import shutil
 import threading
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -23,9 +24,14 @@ from paperflow.metadata import (
     arxiv_id_from_doi,
     arxiv_id_from_extra,
     arxiv_id_from_url,
+    normalize_arxiv_id,
 )
 from paperflow.migration_apply import collection_maps, creation_plan
 from paperflow.taxonomy_v2 import normalize_doi
+from paperflow.taxonomy_v3 import (
+    AMBIGUOUS_CLASSIFICATION_COLLECTION,
+    normalize_title_v3,
+)
 from paperflow.utils import ensure_parent_dir
 from paperflow.vault import (
     DEFAULT_VAULT_LIBRARY,
@@ -341,6 +347,29 @@ def _strip_xml(value: str | None) -> str | None:
     return re.sub(r"\s+", " ", text).strip() or None
 
 
+def _valid_arxiv_title(value: str | None) -> str | None:
+    title = _strip_xml(value)
+    if not title or title.casefold().startswith("arxiv query:"):
+        return None
+    return title
+
+
+def _parse_arxiv_atom(value: str) -> dict[str, Any]:
+    root = ET.fromstring(value)
+    namespace = {"atom": "http://www.w3.org/2005/Atom"}
+    entry = root.find("atom:entry", namespace)
+    if entry is None:
+        return {}
+    title = entry.findtext("atom:title", default="", namespaces=namespace)
+    summary = entry.findtext("atom:summary", default="", namespaces=namespace)
+    published = entry.findtext("atom:published", default="", namespaces=namespace)
+    return {
+        "title": _valid_arxiv_title(title),
+        "abstract": _strip_xml(summary),
+        "year": extract_year(published),
+    }
+
+
 def fetch_arxiv_metadata(
     arxiv_id: str,
     cache_dir: Path = Path("data/cache"),
@@ -350,7 +379,10 @@ def fetch_arxiv_metadata(
     cache_key = arxiv_id.lower()
     cached = cache_get(cache_dir, "arxiv", cache_key)
     if cached is not None:
-        return {**cached, "cache_hit": True}
+        sanitized = {**cached, "title": _valid_arxiv_title(cached.get("title"))}
+        if sanitized != cached:
+            cache_put(cache_dir, "arxiv", cache_key, sanitized)
+        return {**sanitized, "cache_hit": True}
     if not network_enabled:
         return {"metadata_source": None, "cache_hit": False, "error": "network_disabled"}
     try:
@@ -358,14 +390,12 @@ def fetch_arxiv_metadata(
         with httpx.Client(timeout=timeout_seconds) as client:
             response = client.get("https://export.arxiv.org/api/query", params={"id_list": normalized})
             response.raise_for_status()
-        title = _strip_xml((re.search(r"<title>\s*(.*?)\s*</title>", response.text, flags=re.S) or [None, None])[1])
-        summary = _strip_xml((re.search(r"<summary>\s*(.*?)\s*</summary>", response.text, flags=re.S) or [None, None])[1])
-        published = _strip_xml((re.search(r"<published>\s*(.*?)\s*</published>", response.text, flags=re.S) or [None, None])[1])
+        entry = _parse_arxiv_atom(response.text)
         payload = {
             "metadata_source": "arxiv",
-            "title": title if title and title.lower() != "arxiv query: search results" else None,
-            "abstract": summary,
-            "year": extract_year(published),
+            "title": entry.get("title"),
+            "abstract": entry.get("abstract"),
+            "year": entry.get("year"),
             "url": f"https://arxiv.org/abs/{arxiv_id}",
         }
         cache_put(cache_dir, "arxiv", cache_key, payload)
@@ -620,6 +650,93 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
     collections: list[str] = []
     tags = ["status/to-read"]
     reasons: list[str] = []
+    vla_signal = bool(
+        re.search(r"\bvision[- ]language[- ]action\b|\bvla(?:s)?\b", text)
+    )
+    vla_performance_signal = vla_signal and any(
+        term in text
+        for term in (
+            "vla-perf",
+            "inference performance",
+            "inference latency",
+            "real-time inference",
+            "realtime inference",
+            "inference acceleration",
+            "inference benchmark",
+            "throughput",
+        )
+    )
+    neural_ode_signal = any(
+        term in text
+        for term in (
+            "neural ordinary differential equation",
+            "neural ordinary differential equations",
+            "neural ode",
+            "neural odes",
+            "latent ode",
+            "ode-net",
+        )
+    )
+    neural_cde_signal = any(
+        term in text
+        for term in (
+            "neural controlled differential equation",
+            "neural controlled differential equations",
+            "neural cde",
+            "neural cdes",
+            "controlled differential equation",
+            "controlled differential equations",
+            "ncde",
+        )
+    )
+
+    if vla_signal:
+        if vla_performance_signal or any(
+            term in text for term in ("robot benchmark", "robot benchmarks", "manipulation benchmark")
+        ):
+            collections.append(
+                "AI Library/20 Areas/Vision-Language-Action & Robotics/Robot Benchmarks"
+            )
+            tags.append("type/benchmark")
+            reasons.append("matched VLA evaluation/performance signal")
+        elif "robot manipulation" in text or "manipulation policy" in text:
+            collections.append(
+                "AI Library/20 Areas/Vision-Language-Action & Robotics/Robot Manipulation"
+            )
+            tags.extend(["task/robot-manipulation", "method/control"])
+            reasons.append("matched VLA robot-manipulation signal")
+        elif "imitation learning" in text:
+            collections.append(
+                "AI Library/20 Areas/Vision-Language-Action & Robotics/Imitation Learning"
+            )
+            tags.append("task/imitation-learning")
+            reasons.append("matched VLA imitation-learning signal")
+        else:
+            collections.append(
+                "AI Library/20 Areas/Vision-Language-Action & Robotics/Generalist Robot Policies"
+            )
+            reasons.append("matched vision-language-action model signal")
+        tags.append("area/vla-robotics")
+
+    if vla_performance_signal:
+        collections.append("AI Library/20 Areas/Efficient ML Systems/Inference Acceleration")
+        tags.append("area/efficient-ml")
+        reasons.append("matched VLA inference performance/latency signal")
+
+    if neural_ode_signal or neural_cde_signal:
+        collections.append(
+            "AI Library/20 Areas/Time-Series & Dynamical Systems/Neural ODEs & CDEs"
+        )
+        tags.append("area/time-series")
+        if neural_ode_signal:
+            tags.append("method/neural-ode")
+        if neural_cde_signal:
+            tags.append("method/neural-cde")
+        reasons.append(
+            "matched neural ODE/CDE signal"
+            if neural_ode_signal and neural_cde_signal
+            else ("matched neural ODE signal" if neural_ode_signal else "matched neural CDE/NCDE signal")
+        )
     if "looped world models" in text or "first looped architectures for world modelling" in text:
         collections.extend(
             [
@@ -668,7 +785,7 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
         tags.append("method/adaptive-computation")
     source_tag = "source/arxiv" if metadata.get("arxiv_id") else "source/unknown"
     if not collections:
-        collections = ["AI Library/05 Review Queue/Ambiguous Classification"]
+        collections = [AMBIGUOUS_CLASSIFICATION_COLLECTION]
         tags.extend(["status/review-needed", "cleanup/low-confidence"])
         reasons.append("no strong ingest taxonomy signal")
     # Keep required source/type tags from being pushed out by optional method details.
@@ -679,13 +796,21 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
         "area/world-models",
         "area/recurrent-adaptive-computation",
         "area/efficient-ml",
+        "area/vla-robotics",
+        "area/time-series",
         "method/world-model",
         "method/transformer",
         "method/looped-transformer",
         "method/recurrent-depth",
         "method/adaptive-computation",
         "method/parameter-sharing",
+        "method/control",
+        "method/neural-ode",
+        "method/neural-cde",
         "task/world-simulation",
+        "task/robot-manipulation",
+        "task/imitation-learning",
+        "type/benchmark",
         "status/review-needed",
         "cleanup/low-confidence",
     ]
@@ -699,6 +824,31 @@ def classify_ingest_metadata(metadata: dict[str, Any]) -> tuple[list[str], list[
             cleaned.append(tag)
             seen.add(tag)
     return list(dict.fromkeys(collections))[:3], cleaned[:15], reasons
+
+
+def ingest_review_guidance(
+    target_collections: list[str],
+    classification_reasons: list[str],
+) -> dict[str, Any]:
+    review_required = AMBIGUOUS_CLASSIFICATION_COLLECTION in target_collections
+    if not review_required:
+        return {
+            "required": False,
+            "reason": None,
+            "next_action": "Apply the plan, then open the Zotero item to verify its PDF and collections.",
+            "steps": [],
+        }
+    reason = "; ".join(classification_reasons) or "No deterministic taxonomy rule matched the paper metadata."
+    return {
+        "required": True,
+        "reason": reason,
+        "next_action": "Choose the best matching collection under AI Library/20 Areas, then remove this item from Ambiguous Classification.",
+        "steps": [
+            "Open the Zotero item and confirm the title and abstract.",
+            "Add the most specific matching collection under AI Library/20 Areas.",
+            "Remove Ambiguous Classification, status/review-needed, and cleanup/low-confidence after the choice is made.",
+        ],
+    }
 
 
 def _pseudo_item_for_pdf(path: Path, metadata: dict[str, Any]) -> SimpleNamespace:
@@ -837,6 +987,7 @@ def build_ingest_plan(
                     "confidence": classification_confidence,
                     "rationale": rationale,
                 },
+                "review": ingest_review_guidance(target_collections, classification_reasons),
                 "gemini_enabled": False,
                 "network_enabled": network_enabled,
                 "zotero_write_enabled": False,
@@ -884,6 +1035,17 @@ def write_ingest_report(plan: dict[str, Any], path: Path, applied: bool = False)
             f"- `{item['source_path']}` -> `{item['target_path']}` "
             f"(source exists: {exists})"
         )
+        lines.append(
+            f"  - Collections: {', '.join(item.get('target_collections') or []) or 'none'}"
+        )
+        review = item.get("review") or {}
+        if review.get("required"):
+            lines.extend(
+                [
+                    f"  - Review reason: {review.get('reason') or 'Classification needs review.'}",
+                    f"  - Next action: {review.get('next_action') or 'Choose a collection.'}",
+                ]
+            )
     if not plan["items"]:
         lines.append("- None")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -971,21 +1133,71 @@ def _item_arxiv_id(raw_item: dict[str, Any]) -> str | None:
     return (
         arxiv_id_from_doi(doi)
         or arxiv_id_from_url(data.get("url"))
-        or arxiv_id_from_extra(data.get("extra"))
+        or arxiv_id_from_extra(data.get("extra") or data.get("archiveID"))
     )
 
 
-def _find_existing_parent(client: ZoteroWebClient, plan_item: dict[str, Any]) -> str | None:
+def _matching_existing_parent_keys(
+    client: ZoteroWebClient,
+    plan_item: dict[str, Any],
+) -> list[str]:
     doi = plan_item.get("doi_normalized")
-    arxiv_id = plan_item.get("arxiv_id")
-    if not doi and not arxiv_id:
-        return None
+    arxiv_id = normalize_arxiv_id(plan_item.get("arxiv_id"))
+    normalized_title = normalize_title_v3(plan_item.get("title"))
+    planned_year = extract_year(str(plan_item.get("year") or ""))
+    if not doi and not arxiv_id and not normalized_title:
+        return []
+    matches: list[tuple[int, str, str]] = []
     for raw_item in client.iter_top_items():
         data = raw_item.get("data", {})
+        key = str(raw_item.get("key") or data.get("key") or "")
+        if not key:
+            continue
+        score = 0
         if doi and normalize_doi(data.get("DOI") or data.get("doi")) == doi:
-            return str(raw_item.get("key") or data.get("key"))
-        if arxiv_id and _item_arxiv_id(raw_item) == arxiv_id:
-            return str(raw_item.get("key") or data.get("key"))
+            score = 300
+        elif arxiv_id and normalize_arxiv_id(_item_arxiv_id(raw_item)) == arxiv_id:
+            score = 300
+        elif normalized_title and normalize_title_v3(data.get("title")) == normalized_title:
+            existing_year = extract_year(data.get("date"))
+            if planned_year and existing_year and planned_year != existing_year:
+                continue
+            score = 200 if planned_year and existing_year else 150
+        if score:
+            # Prefer the strongest identity, then the oldest matching parent.
+            matches.append((score, str(data.get("dateAdded") or raw_item.get("dateAdded") or ""), key))
+    if not matches:
+        return []
+    matches.sort(key=lambda row: (-row[0], row[1], row[2]))
+    return [row[2] for row in matches]
+
+
+def _find_existing_parent(client: ZoteroWebClient, plan_item: dict[str, Any]) -> str | None:
+    matches = _matching_existing_parent_keys(client, plan_item)
+    return matches[0] if matches else None
+
+
+def _find_existing_linked_attachment(
+    client: ZoteroWebClient,
+    parent_key: str,
+    pdf_path: Path,
+    vault_library: Path,
+) -> dict[str, Any] | None:
+    absolute_path = zotero_linked_attachment_path(pdf_path, vault_library=vault_library)
+    legacy_relative_path = zotero_linked_attachment_path(
+        pdf_path,
+        vault_library=vault_library,
+        relative_to_base_directory=True,
+    )
+    matching_paths = {absolute_path, legacy_relative_path}
+    for child in client.get_item_children(parent_key):
+        data = child.get("data", {})
+        if data.get("itemType") != "attachment":
+            continue
+        if data.get("linkMode") not in {"linked_file", 2}:
+            continue
+        if data.get("path") in matching_paths:
+            return child
     return None
 
 
@@ -1112,7 +1324,9 @@ def apply_ingest_plan(
                 }
             )
 
-            parent_key = _find_existing_parent(client, item)
+            matching_parent_keys = _matching_existing_parent_keys(client, item)
+            parent_key = matching_parent_keys[0] if matching_parent_keys else None
+            duplicate_parent_keys = matching_parent_keys[1:]
             parent_existed = bool(parent_key)
             collection_keys = _collection_keys_for_item(item, key_by_path)
             item_body = _parent_body(item)
@@ -1148,8 +1362,22 @@ def apply_ingest_plan(
                     "item_key": parent_key,
                     "open_uri": _zotero_open_uri(parent_key),
                     "write_executed": True,
+                    "duplicate_parent_keys": duplicate_parent_keys,
                 }
             )
+            if duplicate_parent_keys:
+                events.append(
+                    {
+                        "event": "duplicate-parents-detected",
+                        "canonicalItemKey": parent_key,
+                        "duplicateItemKeys": duplicate_parent_keys,
+                        "preserved": True,
+                        "nextAction": (
+                            "Review the duplicate candidates in Cleanup before merging or deleting; "
+                            "PaperFlow preserved every existing item and its reading work."
+                        ),
+                    }
+                )
             item["zotero_write_enabled"] = True
             item["final_collections"] = item.get("planned_collections") or item.get("target_collections") or []
             item["final_collection_keys"] = collection_keys
@@ -1175,17 +1403,54 @@ def apply_ingest_plan(
                 tags=item.get("planned_tags") or item.get("normalized_tags") or [],
             )
 
-            response = client.post_items(
-                [
-                    linked_attachment_body(
-                        parent_key,
-                        target,
-                        title=item["title"],
-                        vault_library=vault_library,
-                    )
-                ]
+            desired_attachment = linked_attachment_body(
+                parent_key,
+                target,
+                title=item["title"],
+                vault_library=vault_library,
             )
-            attachment_key = _created_key(response.json())
+            existing_attachment = _find_existing_linked_attachment(
+                client,
+                parent_key,
+                target,
+                vault_library,
+            )
+            attachment_reused = existing_attachment is not None
+            attachment_path_repaired = False
+            if existing_attachment is not None:
+                attachment_data = existing_attachment.get("data", {})
+                attachment_key = str(
+                    existing_attachment.get("key") or attachment_data.get("key") or ""
+                )
+                if not attachment_key:
+                    raise ValueError("Existing Zotero attachment has no item key.")
+                if attachment_data.get("path") != desired_attachment["path"]:
+                    response = client.patch_item(
+                        attachment_key,
+                        {"path": desired_attachment["path"]},
+                    )
+                    attachment_path_repaired = True
+                    events.append(
+                        {
+                            "event": "linked-attachment-path-repaired",
+                            "parentItemKey": parent_key,
+                            "attachmentKey": attachment_key,
+                            "path": desired_attachment["path"],
+                            "statusCode": response.status_code,
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "event": "linked-attachment-reused",
+                            "parentItemKey": parent_key,
+                            "attachmentKey": attachment_key,
+                            "path": desired_attachment["path"],
+                        }
+                    )
+            else:
+                response = client.post_items([desired_attachment])
+                attachment_key = _created_key(response.json())
             _set_action(
                 item,
                 "create_linked_attachment",
@@ -1193,16 +1458,19 @@ def apply_ingest_plan(
                 parent_item_key=parent_key,
                 attachment_key=attachment_key,
                 linked_pdf_path=str(target),
+                reused=attachment_reused,
+                path_repaired=attachment_path_repaired,
             )
-            events.append(
-                {
-                    "event": "linked-attachment-created",
-                    "parentItemKey": parent_key,
-                    "attachmentKey": attachment_key,
-                    "path": str(target),
-                    "statusCode": response.status_code,
-                }
-            )
+            if not attachment_reused:
+                events.append(
+                    {
+                        "event": "linked-attachment-created",
+                        "parentItemKey": parent_key,
+                        "attachmentKey": attachment_key,
+                        "path": desired_attachment["path"],
+                        "statusCode": response.status_code,
+                    }
+                )
     return events
 
 
@@ -1252,6 +1520,12 @@ def explain_ingest_plan(plan: dict[str, Any]) -> str:
             lines.append(f"- Zotero item key: {zotero['item_key']}")
         if item.get("final_linked_pdf_path"):
             lines.append(f"- Final linked PDF path: {item['final_linked_pdf_path']}")
+        review = item.get("review") or {}
+        if review.get("required"):
+            lines.append(f"- Review reason: {review.get('reason') or 'Classification needs review.'}")
+            lines.append(f"- Next action: {review.get('next_action') or 'Choose a collection.'}")
+            for step_number, step in enumerate(review.get("steps") or [], start=1):
+                lines.append(f"  {step_number}. {step}")
         if item.get("errors"):
             lines.append(f"- Errors: {item['errors']}")
         lines.append("")

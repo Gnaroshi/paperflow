@@ -5,6 +5,8 @@ import SwiftUI
 final class AppServices {
     static let shared = AppServices()
 
+    private static let followsSpacesDefaultMigrationKey = "pfwFollowsSpacesDefaultV1"
+
     let state = AppState()
     let monitorManager = MultiMonitorManager()
 
@@ -18,6 +20,8 @@ final class AppServices {
     private init() {}
 
     func start() {
+        migrateFollowsSpacesDefaultIfNeeded()
+
         if menuBarController == nil {
             menuBarController = MenuBarController(state: state)
         }
@@ -34,6 +38,22 @@ final class AppServices {
             let hotkeys = GlobalHotkeyManager()
             hotkeys.register(state: state)
             hotkeyManager = hotkeys
+        }
+    }
+
+    private func migrateFollowsSpacesDefaultIfNeeded() {
+        let defaults = UserDefaults.standard
+        let migrationApplied = defaults.bool(forKey: Self.followsSpacesDefaultMigrationKey)
+        let migratedValue = ScreenPlacementPolicy.showAcrossSpacesValue(
+            currentValue: state.showPFWAcrossSpaces,
+            migrationApplied: migrationApplied
+        )
+
+        if state.showPFWAcrossSpaces != migratedValue {
+            state.showPFWAcrossSpaces = migratedValue
+        }
+        if !migrationApplied {
+            defaults.set(true, forKey: Self.followsSpacesDefaultMigrationKey)
         }
     }
 
@@ -70,7 +90,7 @@ final class AppServices {
                 defer: false
             )
             window.title = "PaperFlow"
-            window.minSize = NSSize(width: 980, height: 680)
+            window.minSize = NSSize(width: 760, height: 620)
             window.setFrameAutosaveName("PaperFlow Main Window")
             window.center()
             window.contentView = NSHostingView(
@@ -114,14 +134,14 @@ struct PaperFlowApp: App {
         WindowGroup("PaperFlow") {
             MainWindowView()
                 .environmentObject(AppServices.shared.state)
-                .frame(minWidth: 980, minHeight: 700)
+                .frame(minWidth: 760, minHeight: 620)
                 .onAppear {
                     Task { @MainActor in
                         AppServices.shared.start()
                     }
                 }
         }
-        .defaultSize(width: 1120, height: 820)
+        .defaultSize(width: 1180, height: 820)
 
         Settings {
             SettingsView()

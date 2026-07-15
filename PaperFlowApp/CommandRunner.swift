@@ -30,6 +30,7 @@ final class CommandRunner: ObservableObject {
     private var silenceTimer: DispatchSourceTimer?
     private var currentSpec: CommandSpec?
     private var queuedSpecs: [CommandSpec] = []
+    private var sequenceSpecs: [CommandSpec] = []
     private var progressLineBuffer = ""
 
     var isRunning: Bool {
@@ -50,13 +51,28 @@ final class CommandRunner: ObservableObject {
         runNow(spec)
     }
 
-    private func runNow(_ spec: CommandSpec) {
-        output = ""
-        progressLineBuffer = ""
+    func runSequence(_ specs: [CommandSpec]) {
+        guard let first = specs.first else {
+            return
+        }
+        guard !isRunning, sequenceSpecs.isEmpty else {
+            append("Cannot start dependent workflow while another command is running.\n")
+            return
+        }
+        sequenceSpecs = Array(specs.dropFirst())
+        append("Starting success-gated workflow with \(specs.count) commands.\n")
+        runNow(first)
+    }
+
+    private func runNow(_ spec: CommandSpec, preservingOutput: Bool = false) {
         currentSpec = spec
+        if !preservingOutput {
+            output = ""
+            currentLogFile = makeLogFileURL()
+        }
+        progressLineBuffer = ""
         currentCommand = spec.redactedDisplayCommand
         currentWorkingDirectory = spec.workingDirectory.path
-        currentLogFile = makeLogFileURL()
         currentPID = nil
         startedAt = Date()
         elapsedSeconds = 0
@@ -119,18 +135,20 @@ final class CommandRunner: ObservableObject {
                 self?.process = nil
                 self?.currentSpec = nil
                 self?.currentPID = nil
+                var commandSucceeded = false
                 if finalStatus == .cancelled {
                     self?.notify(title: "PaperFlow cancelled", body: "Command was cancelled.")
                 } else if finalStatus == .timedOut {
                     self?.notify(title: "PaperFlow timed out", body: "Command was terminated after timeout.")
                 } else if finishedProcess.terminationReason == .exit && finishedProcess.terminationStatus == 0 {
+                    commandSucceeded = true
                     self?.status = .succeeded(finishedProcess.terminationStatus)
                     self?.notify(title: "PaperFlow finished", body: "Command succeeded.")
                 } else {
                     self?.status = .failed(finishedProcess.terminationStatus)
                     self?.notify(title: "PaperFlow failed", body: "Exit code \(finishedProcess.terminationStatus).")
                 }
-                self?.runNextQueuedIfNeeded()
+                self?.continueWorkflow(commandSucceeded: commandSucceeded)
             }
         }
 
@@ -146,7 +164,7 @@ final class CommandRunner: ObservableObject {
             self.currentPID = nil
             append("Failed to start process: \(error.localizedDescription)\n")
             notify(title: "PaperFlow failed to start", body: error.localizedDescription)
-            runNextQueuedIfNeeded()
+            continueWorkflow(commandSucceeded: false)
             return
         }
 
@@ -311,6 +329,20 @@ final class CommandRunner: ObservableObject {
         let next = queuedSpecs.removeFirst()
         queuedCount = queuedSpecs.count
         runNow(next)
+    }
+
+    private func continueWorkflow(commandSucceeded: Bool) {
+        if commandSucceeded, !sequenceSpecs.isEmpty {
+            let next = sequenceSpecs.removeFirst()
+            append("\nPrevious step succeeded. Starting next workflow step.\n")
+            runNow(next, preservingOutput: true)
+            return
+        }
+        if !commandSucceeded, !sequenceSpecs.isEmpty {
+            append("\nWorkflow stopped. \(sequenceSpecs.count) dependent command(s) were not executed.\n")
+            sequenceSpecs.removeAll()
+        }
+        runNextQueuedIfNeeded()
     }
 
     private func makeLogFileURL() -> URL {

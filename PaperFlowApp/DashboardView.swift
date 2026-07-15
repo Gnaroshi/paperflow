@@ -5,26 +5,28 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionTitle("Dashboard")
-                Spacer()
-                Picker("Gemini model", selection: $state.geminiModel) {
-                    Text("2.5 Flash").tag("gemini-2.5-flash")
-                    Text("2.5 Flash Lite").tag("gemini-2.5-flash-lite")
-                    Text("2.0 Flash").tag("gemini-2.0-flash")
-                    Text("Custom").tag("custom")
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    SectionTitle("Dashboard")
+                    Spacer()
+                    modelPicker
                 }
-                .labelsHidden()
-                .frame(width: 210)
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionTitle("Dashboard")
+                    modelPicker
+                }
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                heroStatusCard
-                VStack(spacing: 12) {
-                    compactStatus(title: "Zotero", value: state.zoteroVerification.verified ? "Verified" : "Unverified", detail: "Write: \(state.zoteroVerification.writeAccess ? "yes" : "no")", icon: "books.vertical")
-                    compactStatus(title: "Gemini", value: state.geminiVerification.verified ? "Verified" : state.geminiConnectionStatus, detail: state.selectedGeminiModel, icon: "sparkles")
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    heroStatusCard
+                    connectionStatusCards
+                        .frame(width: 240)
                 }
-                .frame(width: 240)
+                VStack(alignment: .leading, spacing: 12) {
+                    heroStatusCard
+                    connectionStatusCards
+                }
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 10)], spacing: 10) {
@@ -64,6 +66,24 @@ struct DashboardView: View {
         }
     }
 
+    private var modelPicker: some View {
+        Picker("Gemini model", selection: $state.geminiModel) {
+            Text("2.5 Flash").tag("gemini-2.5-flash")
+            Text("2.5 Flash Lite").tag("gemini-2.5-flash-lite")
+            Text("2.0 Flash").tag("gemini-2.0-flash")
+            Text("Custom").tag("custom")
+        }
+        .labelsHidden()
+        .frame(width: 210)
+    }
+
+    private var connectionStatusCards: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
+            compactStatus(title: "Zotero", value: state.zoteroVerification.verified ? "Verified" : "Unverified", detail: "Write: \(state.zoteroVerification.writeAccess ? "yes" : "no")", icon: "books.vertical")
+            compactStatus(title: "Gemini", value: state.geminiVerification.verified ? "Verified" : state.geminiConnectionStatus, detail: state.selectedGeminiModel, icon: "sparkles")
+        }
+    }
+
     private var heroStatusCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("PaperFlow Local Library", systemImage: "doc.text.magnifyingglass")
@@ -76,12 +96,16 @@ struct DashboardView: View {
             HStack {
                 Label(state.vaultStatus.exists ? "Vault ready" : "Vault missing", systemImage: state.vaultStatus.exists ? "externaldrive.fill" : "externaldrive.badge.xmark")
                 Spacer()
-                Text(state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)" : "Init Vault 필요")
+                Text(state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)" : "로컬 PDF 저장 폴더 없음")
                     .foregroundStyle(PaperFlowTheme.muted)
             }
             .font(.callout)
             HStack {
-                Button("Open Vault") { state.openVault() }
+                if state.vaultStatus.exists {
+                    Button("Open Vault") { state.openVault() }
+                } else {
+                    Button("Vault 초기화") { state.runVaultInit() }
+                }
                 Button("Open Reports") { state.openReportsFolder() }
                 Button("Refresh") { state.refreshStatus() }
             }

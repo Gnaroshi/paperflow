@@ -82,13 +82,13 @@ def test_linked_attachment_body_does_not_upload_file() -> None:
     assert "file" not in body
 
 
-def test_linked_attachment_body_uses_relative_base_directory_path(tmp_path: Path) -> None:
+def test_linked_attachment_body_uses_absolute_path_without_hidden_zotero_setting(tmp_path: Path) -> None:
     vault = tmp_path / "Library"
     pdf = vault / "2025" / "paper.pdf"
 
     body = linked_attachment_body("PARENT", pdf, "Paper", vault_library=vault)
 
-    assert body["path"] == "attachments:2025/paper.pdf"
+    assert body["path"] == str(pdf.resolve())
 
 
 def test_cleanup_stored_attachments_refuses_missing_verify_on_apply(tmp_path: Path) -> None:

@@ -55,13 +55,64 @@ struct LocalFolderImportView: View {
         }
     }
 
+    private var scanState: WorkflowStepState {
+        state.workflowStepState(
+            commandFragment: "local scan",
+            outputs: ["data/local_scan.json"]
+        )
+    }
+
+    private var matchState: WorkflowStepState {
+        state.workflowStepState(
+            commandFragment: "local match-zotero",
+            prerequisiteGroups: [["data/local_scan.json"]],
+            outputs: ["data/zotero_index.json", "data/local_zotero_match_plan.json"]
+        )
+    }
+
+    private var classifyState: WorkflowStepState {
+        state.workflowStepState(
+            commandFragment: "local classify-new",
+            prerequisiteGroups: [["data/local_scan.json"], ["data/local_zotero_match_plan.json"]],
+            outputs: ["data/local_classification_plan.json"]
+        )
+    }
+
+    private var planState: WorkflowStepState {
+        state.workflowStepState(
+            commandFragment: "local plan-import",
+            prerequisiteGroups: [["data/local_classification_plan.json"]],
+            outputs: ["data/local_import_plan.json"]
+        )
+    }
+
+    private var applyState: WorkflowStepState {
+        guard state.zoteroVerification.writeAccess else {
+            return .blocked("Verify Zotero write access in Settings")
+        }
+        return state.workflowStepState(
+            commandFragment: "local apply-import",
+            prerequisiteGroups: [["data/local_import_plan.json"]]
+        )
+    }
+
+    private var auditState: WorkflowStepState {
+        guard state.hasGeneratedArtifact(prefix: "local_import_apply_log_", suffix: ".json") else {
+            return .blocked("Requires a successful local import apply log")
+        }
+        return state.workflowStepState(
+            commandFragment: "local audit-import",
+            outputs: ["data/local_import_audit.json", "data/local_import_audit.md"]
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionTitle("Local Folder Import")
-            Text("Recursively scan local PDFs, exclude papers already in Zotero, classify only new papers, then copy them into the local vault as linked-local Zotero attachments.")
+            Text("Downloads나 선택한 폴더의 PDF를 검사하고, Zotero에 없는 새 논문만 local vault로 복사한 뒤 Zotero item과 linked attachment로 추가합니다.")
                 .foregroundStyle(PaperFlowTheme.muted)
 
-            WarningBox(text: "Dry-run steps perform no file copies and no Zotero writes. Apply Import copies PDFs to the local vault and creates linked attachments only. Zotero Storage upload is always false.")
+            WarningBox(text: "Scan, match, classify, plan은 dry-run입니다. Add to Zotero 단계에서만 PDF를 vault로 복사하고 Zotero parent item, collection, tag, linked attachment를 생성합니다. Zotero Storage upload는 항상 false입니다.")
 
             folderControls
             settingsControls
@@ -86,18 +137,29 @@ struct LocalFolderImportView: View {
     }
 
     private var folderControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    state.chooseLocalImportFolder()
-                } label: {
-                    Label("Choose Folder", systemImage: "folder")
+        SurfaceSection(title: "Source folder", subtitle: "PDF만 재귀적으로 스캔하며 원본 파일은 dry-run에서 변경하지 않습니다.") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    Button {
+                        state.chooseLocalImportFolder()
+                    } label: {
+                        Label("Choose Folder", systemImage: "folder")
+                    }
+                    TextField("Terminal path", text: $state.localImportPath)
+                        .paperFlowTextInput()
+                        .font(.system(.body, design: .monospaced))
+                    Button("Refresh") {
+                        state.refreshLocalImportStatus()
+                    }
                 }
-                TextField("Terminal path", text: $state.localImportPath)
-                    .paperFlowTextInput()
-                    .font(.system(.body, design: .monospaced))
-                Button("Refresh Results") {
-                    state.refreshLocalImportStatus()
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Terminal path", text: $state.localImportPath)
+                        .paperFlowTextInput()
+                        .font(.system(.body, design: .monospaced))
+                    FlowLayout(spacing: 8) {
+                        Button("Choose Folder") { state.chooseLocalImportFolder() }
+                        Button("Refresh Results") { state.refreshLocalImportStatus() }
+                    }
                 }
             }
             StatusLine(label: "Project", value: state.projectPath)
@@ -105,8 +167,8 @@ struct LocalFolderImportView: View {
     }
 
     private var settingsControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 18) {
+        SurfaceSection(title: "Import policy") {
+            FlowLayout(spacing: 14) {
                 Toggle("Recursive", isOn: $state.localImportRecursive)
                 TextField("Max depth", text: $state.localImportMaxDepth)
                     .paperFlowTextInput()
@@ -115,7 +177,7 @@ struct LocalFolderImportView: View {
                 Toggle("Use Gemini for ambiguous classification", isOn: $state.localImportUseGemini)
                 Toggle("Stop on Gemini quota hit", isOn: $state.localImportStopOnGeminiQuota)
             }
-            HStack(spacing: 18) {
+            FlowLayout(spacing: 18) {
                 StatusLine(label: "Storage mode", value: "linked-local")
                 StatusLine(label: "Zotero Storage upload", value: "false")
                 StatusLine(label: "Latest data", value: state.localImportData.generatedStatus)
@@ -124,35 +186,20 @@ struct LocalFolderImportView: View {
     }
 
     private var workflowButtons: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
-                WorkflowButton(title: "Scan Folder", icon: "magnifyingglass") {
-                    state.runLocalFolderScan()
-                }
-                WorkflowButton(title: "Match Zotero", icon: "link") {
-                    state.runLocalFolderMatchZotero()
-                }
-                WorkflowButton(title: "Classify New Papers", icon: "sparkles") {
-                    state.runLocalFolderClassifyNew()
-                }
-                WorkflowButton(title: "Plan Import", icon: "list.bullet.rectangle") {
-                    state.runLocalFolderPlanImport()
-                }
-                WorkflowButton(title: "Audit Import", icon: "checkmark.seal") {
-                    state.runLocalFolderAuditImport()
-                }
-                Button(role: .destructive) {
+        SurfaceSection(
+            title: "Import workflow",
+            subtitle: "각 단계는 이전 산출물을 검사합니다. Match Zotero의 두 backend 명령은 첫 명령 성공 시에만 이어서 실행됩니다."
+        ) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
+                WorkflowStepCard(number: 1, title: "Scan Folder", detail: "PDF hash, first pages, identifiers를 수집", icon: "magnifyingglass", state: scanState, actionTitle: "Scan", action: state.runLocalFolderScan)
+                WorkflowStepCard(number: 2, title: "Match Zotero", detail: "Zotero index 생성 후 existing/update candidate 판별", icon: "link", state: matchState, actionTitle: "Index & Match", action: state.runLocalFolderMatchZotero)
+                WorkflowStepCard(number: 3, title: "Classify New Papers", detail: "new 상태인 PDF만 taxonomy로 분류", icon: "sparkles", state: classifyState, actionTitle: "Classify", action: state.runLocalFolderClassifyNew)
+                WorkflowStepCard(number: 4, title: "Plan Import", detail: "vault 경로와 linked-local Zotero operation 생성", icon: "list.bullet.rectangle", state: planState, actionTitle: "Build Plan", action: state.runLocalFolderPlanImport)
+                WorkflowStepCard(number: 5, title: "Add to Zotero", detail: "확인 후 vault copy, Zotero item, collection/tag, linked attachment 생성", icon: "square.and.arrow.down", state: applyState, actionTitle: "Review & Add") {
                     confirm(.applyLocalImport)
-                } label: {
-                    Label("Apply Import", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(state.runner.isRunning)
+                WorkflowStepCard(number: 6, title: "Audit Import", detail: "vault file, Zotero item, linked attachment를 검증", icon: "checkmark.seal", state: auditState, actionTitle: "Run Audit", action: state.runLocalFolderAuditImport)
             }
-            Text("Match Zotero runs `local index-zotero` followed by `local match-zotero`. Apply Import requires typing `IMPORT LOCAL PAPERS`.")
-                .font(.caption)
-                .foregroundStyle(PaperFlowTheme.muted)
         }
     }
 
@@ -175,12 +222,21 @@ struct LocalFolderImportView: View {
     }
 
     private var filterControls: some View {
-        Picker("Filter", selection: $selectedFilter) {
-            ForEach(LocalImportFilter.allCases) { filter in
-                Text(filter.rawValue).tag(filter)
+        ViewThatFits(in: .horizontal) {
+            Picker("Filter", selection: $selectedFilter) {
+                ForEach(LocalImportFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
             }
+            .pickerStyle(.segmented)
+            Picker("Filter", selection: $selectedFilter) {
+                ForEach(LocalImportFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 260, alignment: .leading)
         }
-        .pickerStyle(.segmented)
     }
 
     private var localEditNotice: some View {

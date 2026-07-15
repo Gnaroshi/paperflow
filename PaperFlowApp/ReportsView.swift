@@ -23,37 +23,60 @@ struct ReportsView: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], spacing: 12) {
-                ReportButton(title: "Migration Report") { state.openReport("migration_report.md") }
-                ReportButton(title: "Apply Preview") { state.openReport("apply_preview.md") }
-                ReportButton(title: "Cleanup Report") { state.openReport("cleanup_report.md") }
-                ReportButton(title: "Dedupe Report") { state.openReport("dedupe_report.md") }
-                ReportButton(title: "Abstract Repair Report") { state.openReport("abstract_repair_report.md") }
-                ReportButton(title: "Metadata Repair Report") { state.openReport("metadata_repair_report.md") }
-                ReportButton(title: "Duplicate Resolution Report") { state.openReport("duplicate_resolution_report.md") }
-                ReportButton(title: "Migration Audit") { state.openReport("migration_audit.md") }
-                ReportButton(title: "Local Scan Report") { state.openReport("local_scan_report.md") }
-                ReportButton(title: "Local Match Report") { state.openReport("local_zotero_match_report.md") }
-                ReportButton(title: "Local Classification Report") { state.openReport("local_classification_report.md") }
-                ReportButton(title: "Local Import Report") { state.openReport("local_import_report.md") }
-                ReportButton(title: "Local Import Audit") { state.openReport("local_import_audit.md") }
-                ReportButton(title: "Localize Attachments Report") { state.openReport("localize_attachments_report.md") }
-                ReportButton(title: "Localize Verify Report") { state.openReport("localize_verify_report.md") }
-                ReportButton(title: "Latest Apply Log") { state.openLatestApplyLog() }
-                ReportButton(title: "Reports Folder") { state.openReportsFolder() }
+                reportButton("Migration Report", file: "migration_report.md")
+                reportButton("Apply Preview", file: "apply_preview.md")
+                reportButton("Cleanup Report", file: "cleanup_report.md")
+                reportButton("Dedupe Report", file: "dedupe_report.md")
+                reportButton("Abstract Repair Report", file: "abstract_repair_report.md")
+                reportButton("Metadata Repair Report", file: "metadata_repair_report.md")
+                reportButton("Duplicate Resolution Report", file: "duplicate_resolution_report.md")
+                reportButton("Migration Audit", file: "migration_audit.md")
+                reportButton("Local Scan Report", file: "local_scan_report.md")
+                reportButton("Local Match Report", file: "local_zotero_match_report.md")
+                reportButton("Local Classification Report", file: "local_classification_report.md")
+                reportButton("Local Import Report", file: "local_import_report.md")
+                reportButton("Local Import Audit", file: "local_import_audit.md")
+                reportButton("Localize Attachments Report", file: "localize_attachments_report.md")
+                reportButton("Localize Verify Report", file: "localize_verify_report.md")
+                ReportButton(
+                    title: "Latest Apply Log",
+                    available: state.hasGeneratedArtifact(prefix: "apply_log_", suffix: ".md"),
+                    action: state.openLatestApplyLog
+                )
+                ReportButton(title: "Reports Folder", available: true) { state.openReportsFolder() }
             }
+        }
+    }
+
+    private func reportButton(_ title: String, file: String) -> some View {
+        ReportButton(
+            title: title,
+            available: state.artifactExists("data/\(file)")
+        ) {
+            state.openReport(file)
         }
     }
 }
 
 struct ReportButton: View {
     let title: String
+    let available: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: "doc.text")
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Image(systemName: available ? "doc.text.fill" : "doc.text")
+                Text(title)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(available ? "Ready" : "Missing")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(available ? PaperFlowTheme.mint : PaperFlowTheme.faint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.bordered)
+        .disabled(!available)
     }
 }

@@ -76,8 +76,10 @@ from `dist/PaperFlow.app` during development. The menu bar item is only for
 status/settings/actions; it is not the PDF drop surface. Use Settings for:
 
 - `PaperFlow project directory`: the folder containing `pyproject.toml`
-- `uv path`: usually `/opt/homebrew/bin/uv`, `/usr/local/bin/uv`, or
-  `~/.local/bin/uv`
+- `uv path`: use the repo-local `bin/paperflow-uv` wrapper. Run
+  `scripts/bootstrap_uv.sh` once to copy the uv binary into
+  `.paperflow/bin/uv`. The wrapper isolates `.venv`, uv cache, downloaded
+  Python versions, and uv tools inside this repository.
 - `local vault path`: default `~/Papers/Paperflow/Library`
 - Zotero API key: stored in macOS Keychain and redacted in logs
 - Numeric Zotero user ID: fetch from the Zotero API key; email addresses and
@@ -200,6 +202,25 @@ The app writes its own logs to:
 Secrets are redacted from displayed and saved command output.
 
 ## Troubleshooting
+
+### Keychain or Desktop permission appears after every rebuild
+
+PaperFlow needs a stable Apple code-signing identity. An ad-hoc signature changes
+whenever the executable is rebuilt, so macOS can treat the next build as a different
+application even though the bundle identifier remains `com.paperflow.app`. Keychain
+"Always Allow" and Files & Folders consent then apply only to the previous build.
+
+1. Open Xcode -> Settings -> Accounts and select the Apple Developer account.
+2. Open Manage Certificates and create or download an Apple Development certificate
+   for local builds. Use Developer ID Application for public distribution.
+3. Confirm `security find-identity -v -p codesigning` lists the certificate.
+4. Run `./build_app.sh`. It automatically prefers Developer ID Application, then
+   Apple Development. `PAPERFLOW_SIGNING_IDENTITY` can select one explicitly.
+5. Install the newly signed app, open it once, and approve Keychain and Desktop access.
+
+The current PaperFlow project is under `~/Desktop`, which is a macOS protected
+folder. Keeping the project under `~/Developer` avoids Desktop-folder consent. If it
+stays on Desktop, a stable signature allows the approval to survive future builds.
 
 - If `uv` cannot be found, set the full executable path in Settings.
 - If Zotero Web API calls fail, verify that `ZOTERO_USER_ID` is numeric and the

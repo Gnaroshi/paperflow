@@ -16,12 +16,22 @@ struct CleanupWorkbenchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                SectionTitle("Cleanup Workbench")
-                Spacer()
-                Button("Refresh") { reload() }
-                Button("Migration Audit") { state.runMigrationAudit() }
-                Button("Plan Duplicate Resolution") { state.runPlanDuplicateResolution() }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    SectionTitle("Cleanup Workbench")
+                    Spacer()
+                    Button("Refresh") { reload() }
+                    Button("Migration Audit") { state.runMigrationAudit() }
+                    Button("Plan Duplicate Resolution") { state.runPlanDuplicateResolution() }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionTitle("Cleanup Workbench")
+                    FlowLayout(spacing: 8) {
+                        Button("Refresh") { reload() }
+                        Button("Migration Audit") { state.runMigrationAudit() }
+                        Button("Plan Duplicate Resolution") { state.runPlanDuplicateResolution() }
+                    }
+                }
             }
 
             WarningBox(text: "Cleanup is review-first. PaperFlow never deletes notes, highlights, annotations, child notes, parent items, or attachments from this workbench.")
@@ -85,46 +95,68 @@ struct CleanupWorkbenchView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Where did this paper go?")
                 .font(.headline)
-            HStack {
-                TextField("Search title, DOI, arXiv ID, or item key", text: $explainQuery)
-                    .paperFlowTextInput()
-                Button("Explain via CLI") {
-                    if let first = explainedItems.first {
-                        state.runExplainItem(first.itemKey)
-                    } else {
-                        state.invalidDropWarnings = ["No matching item found in data/migration_plan.json."]
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    explainField
+                    explainButton
                 }
-                .disabled(explainedItems.isEmpty)
+                VStack(alignment: .leading, spacing: 8) {
+                    explainField
+                    explainButton
+                }
             }
             ForEach(explainedItems.prefix(explainQuery.isEmpty ? 0 : 5)) { item in
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(item.title)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Text(item.itemKey)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(PaperFlowTheme.muted)
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text(item.title)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            itemKey(item.itemKey)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .fontWeight(.semibold)
+                            itemKey(item.itemKey)
+                        }
                     }
                     WorkbenchFlowRow(label: "Before", values: item.currentCollections)
                     WorkbenchFlowRow(label: "After", values: item.plannedCollections)
                     WorkbenchFlowRow(label: "Tags", values: item.normalizedTags)
                     Text("Why: \(item.rationale)")
                         .foregroundStyle(PaperFlowTheme.muted)
-                    HStack {
+                    FlowLayout(spacing: 8) {
                         Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                         Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                             .disabled(item.localPDFPaths.isEmpty)
-                        Button("Undo this item") {
-                            state.invalidDropWarnings = ["Backend command missing: per-item rollback is not implemented. Use uv run paperflow zotero rollback with a backup for full rollback."]
-                        }
                     }
                 }
                 .padding(10)
                 .paperFlowCard(tint: PaperFlowTheme.sky, radius: 12)
             }
         }
+    }
+
+    private var explainField: some View {
+        TextField("Search title, DOI, arXiv ID, or item key", text: $explainQuery)
+            .paperFlowTextInput()
+    }
+
+    private var explainButton: some View {
+        Button("Explain via CLI") {
+            if let first = explainedItems.first {
+                state.runExplainItem(first.itemKey)
+            } else {
+                state.invalidDropWarnings = ["No matching item found in data/migration_plan.json."]
+            }
+        }
+        .disabled(explainedItems.isEmpty)
+    }
+
+    private func itemKey(_ value: String) -> some View {
+        Text(value)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(PaperFlowTheme.muted)
     }
 
     private func reload() {
@@ -183,14 +215,14 @@ private struct MissingAbstractPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("Selected", selection: $selectedItemKey) {
-                    Text("None").tag("")
-                    ForEach(items) { item in
-                        Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
-                    }
+            Picker("Selected", selection: $selectedItemKey) {
+                Text("None").tag("")
+                ForEach(items) { item in
+                    Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
                 }
-                .frame(maxWidth: 420)
+            }
+            .frame(maxWidth: 520)
+            FlowLayout(spacing: 8) {
                 Button("Repair Selected") { repairSelected() }
                 Button("Repair All Dry Run") { repairAllDryRun() }
                 Button("Apply Selected Repairs") { applySelected() }
@@ -240,14 +272,14 @@ private struct MissingMetadataPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("Selected", selection: $selectedItemKey) {
-                    Text("None").tag("")
-                    ForEach(items) { item in
-                        Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
-                    }
+            Picker("Selected", selection: $selectedItemKey) {
+                Text("None").tag("")
+                ForEach(items) { item in
+                    Text("\(item.title) (\(item.itemKey))").tag(item.itemKey)
                 }
-                .frame(maxWidth: 420)
+            }
+            .frame(maxWidth: 520)
+            FlowLayout(spacing: 8) {
                 Button("Repair Selected") { repairSelected() }
                 Button("Repair All Dry Run") { repairAllDryRun() }
                 Button("Apply Selected Repairs") { applySelected() }
@@ -405,7 +437,7 @@ private struct CleanupItemCard<Extra: View>: View {
             Text("Rationale: \(item.rationale)")
                 .foregroundStyle(PaperFlowTheme.muted)
             extra
-            HStack {
+            FlowLayout(spacing: 8) {
                 Button("Open in Zotero") { openZoteroItem(item.itemKey) }
                 Button("Reveal PDF") { revealFirstPDF(item.localPDFPaths) }
                     .disabled(item.localPDFPaths.isEmpty)
@@ -473,7 +505,7 @@ private struct DuplicateItemCard: View {
                 SmallFact(label: "Comments", value: "\(item.commentCount)")
                 SmallFact(label: "PDFs", value: item.pdfStatus)
             }
-            HStack {
+            FlowLayout(spacing: 8) {
                 Button("Keep canonical") {
                     state.invalidDropWarnings = ["Review action recorded only in your head for now. Backend command missing: duplicate review state persistence."]
                 }

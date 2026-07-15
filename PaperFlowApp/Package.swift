@@ -16,6 +16,7 @@ let package = Package(
             path: ".",
             exclude: [
                 "README.md",
+                "UI_UX_CHECKLIST.md",
                 "Info.plist",
                 "PaperFlow.entitlements",
                 "build_app.sh",

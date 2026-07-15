@@ -41,7 +41,7 @@ struct UserGuideView: View {
                 title: "5. Zotero 정리",
                 icon: "books.vertical",
                 text: """
-                Zotero Organize는 Backup → Enrich Metadata → Detect Duplicates → Plan Migration → Dry Run Migration → Apply Migration 순서로 사용합니다. Apply는 반드시 REPLACE MY ZOTERO COLLECTIONS 입력이 필요하며, notes/highlights/annotations/attachments를 삭제하지 않아야 합니다.
+                Zotero Organize는 Backup → Enrich Metadata → Detect Duplicates → Plan Migration → Dry Run Migration → Apply Migration 순서로 사용합니다. 현재 backup과 dry-run preview가 확인되면 Apply를 한 번 눌러 실행할 수 있으며, notes/highlights/annotations/attachments는 삭제하지 않아야 합니다.
                 """
             )
 

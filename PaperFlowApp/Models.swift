@@ -399,6 +399,47 @@ enum RunStatus: Equatable {
     }
 }
 
+enum WorkflowStepState: Equatable {
+    case blocked(String)
+    case ready
+    case running
+    case completed
+    case outdated(String)
+
+    var label: String {
+        switch self {
+        case .blocked:
+            return "Blocked"
+        case .ready:
+            return "Ready"
+        case .running:
+            return "Running"
+        case .completed:
+            return "Completed"
+        case .outdated:
+            return "Update required"
+        }
+    }
+
+    var detail: String? {
+        switch self {
+        case .blocked(let message), .outdated(let message):
+            return message
+        case .ready, .running, .completed:
+            return nil
+        }
+    }
+
+    var allowsExecution: Bool {
+        switch self {
+        case .ready, .completed, .outdated:
+            return true
+        case .blocked, .running:
+            return false
+        }
+    }
+}
+
 enum ConfirmationKind: Identifiable {
     case applyIngest
     case applyMigration
@@ -542,6 +583,25 @@ struct VaultStatus {
 
     var totalSizeLabel: String {
         ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
+    }
+}
+
+struct FolderLocationStatus {
+    var name: String
+    var path: String
+    var exists = false
+    var isScanned = false
+    var pdfCount = 0
+    var totalBytes: UInt64 = 0
+
+    var totalSizeLabel: String {
+        ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
+    }
+
+    var summary: String {
+        guard exists else { return "Not found" }
+        guard isScanned else { return "Available · not scanned" }
+        return "\(pdfCount) PDFs · \(totalSizeLabel)"
     }
 }
 
