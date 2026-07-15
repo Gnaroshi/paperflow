@@ -111,15 +111,17 @@ if command -v mdimport >/dev/null 2>&1; then
 fi
 
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  spotlight_match="$(mdfind 'kMDItemCFBundleIdentifier == "com.paperflow.app"cd' | grep -F -x "$APP_DST" || true)"
+  spotlight_match="$(mdfind 'kMDItemCFBundleIdentifier == "com.paperflow.app"' | grep -F -x "$APP_DST" || true)"
   if [[ "$spotlight_match" == "$APP_DST" ]]; then
     break
   fi
   sleep 1
 done
 
-if [[ "$(mdfind 'kMDItemCFBundleIdentifier == "com.paperflow.app"cd' | grep -F -x "$APP_DST" || true)" != "$APP_DST" ]]; then
+if [[ "$(mdfind 'kMDItemCFBundleIdentifier == "com.paperflow.app"' | grep -F -x "$APP_DST" || true)" != "$APP_DST" ]]; then
   echo "Installed app was not found at the exact Spotlight path: $APP_DST" >&2
+  restore_previous_install
+  trap - ERR INT TERM
   exit 2
 fi
 
