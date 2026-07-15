@@ -17,10 +17,18 @@ swift build -c release
 APP_DIR="$SCRIPT_DIR/dist/PaperFlow.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ENTITLEMENTS="$SCRIPT_DIR/PaperFlow.entitlements"
 ZIP_PATH="$SCRIPT_DIR/dist/PaperFlow.zip"
 DMG_STAGE="$SCRIPT_DIR/dist/dmg-stage"
 DMG_PATH="$SCRIPT_DIR/dist/PaperFlow.dmg"
+APP_VERSION="$(python3 -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("../pyproject.toml").read_text())["project"]["version"])')"
+BUILD_NUMBER="$(git -C "$SCRIPT_DIR/.." rev-list --count HEAD)"
+GIT_COMMIT="$(git -C "$SCRIPT_DIR/.." rev-parse HEAD)"
+GIT_DIRTY=false
+if [[ -n "$(git -C "$SCRIPT_DIR/.." status --porcelain)" ]]; then
+  GIT_DIRTY=true
+fi
 
 find_signing_identity() {
   local identities identity
@@ -62,40 +70,92 @@ package_archives() {
 }
 
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$SCRIPT_DIR/.build/release/PaperFlowApp" "$MACOS_DIR/PaperFlow"
 cp "$SCRIPT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$SCRIPT_DIR/../identity/app-icon/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+cp "$SCRIPT_DIR/../gnaroshi.app.json" "$RESOURCES_DIR/gnaroshi.app.json"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
+python3 - "$RESOURCES_DIR/build-provenance.json" "$APP_VERSION" "$BUILD_NUMBER" "$GIT_COMMIT" "$GIT_DIRTY" <<'PY'
+import json
+import pathlib
+import sys
+
+path, version, number, commit, dirty = sys.argv[1:]
+pathlib.Path(path).write_text(
+    json.dumps(
+        {
+            "schemaVersion": 1,
+            "version": version,
+            "buildNumber": int(number),
+            "commit": commit,
+            "dirty": dirty == "true",
+        },
+        indent=2,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
 chmod +x "$MACOS_DIR/PaperFlow"
 
-if [[ -n "$SIGNING_IDENTITY" ]]; then
-  if [[ "$SIGNING_IDENTITY" != Developer\ ID\ Application:* ]]; then
-    echo "Using $SIGNING_IDENTITY for stable local signing." >&2
-    echo "Public distribution still requires a Developer ID Application identity." >&2
+SIGNING_MODE="${SIGNING_MODE:-development}"
+if [[ "$SIGNING_MODE" == "release" && "$GIT_DIRTY" == "true" ]]; then
+  echo "Release packaging requires a clean Git checkout." >&2
+  exit 2
+fi
+if [[ "$SIGNING_MODE" == "release" ]]; then
+  if [[ -z "${DEVELOPER_ID_APPLICATION:-}" ]]; then
+    if [[ "$SIGNING_IDENTITY" == Developer\ ID\ Application:* ]]; then
+      DEVELOPER_ID_APPLICATION="$SIGNING_IDENTITY"
+    else
+      DEVELOPER_ID_APPLICATION="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)"
+    fi
+  fi
+  if [[ -z "$DEVELOPER_ID_APPLICATION" ]]; then
+    echo "A Developer ID Application identity is required for release builds." >&2
+    exit 2
+  fi
+  if [[ "$DEVELOPER_ID_APPLICATION" != Developer\ ID\ Application:* ]]; then
+    echo "DEVELOPER_ID_APPLICATION should be a Developer ID Application identity for public distribution." >&2
+    echo "Current value: $DEVELOPER_ID_APPLICATION" >&2
     if [[ -n "${NOTARY_PROFILE:-}" ]]; then
       echo "Refusing notarization with a non-Developer-ID signing identity." >&2
       exit 2
     fi
+    exit 2
   fi
-  if [[ "$SIGNING_IDENTITY" == Developer\ ID\ Application:* ]]; then
-    codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_DIR"
-  else
-    codesign --force --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_DIR"
-  fi
+  codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$DEVELOPER_ID_APPLICATION" "$APP_DIR"
   codesign --verify --deep --strict --verbose=2 "$APP_DIR"
-  echo "Signed $APP_DIR with $SIGNING_IDENTITY"
+  echo "Signed $APP_DIR with $DEVELOPER_ID_APPLICATION"
 else
-  codesign --force --sign - "$APP_DIR"
-  echo "WARNING: ad-hoc signing changes identity after every rebuild." >&2
-  echo "Keychain and Desktop access prompts can repeat until an Apple signing certificate is installed." >&2
-  echo "Set PAPERFLOW_SIGNING_IDENTITY or install an Apple Development/Developer ID certificate in Xcode." >&2
+  LOCAL_SIGNING_IDENTITY="${LOCAL_SIGNING_IDENTITY:-$SIGNING_IDENTITY}"
+  if [[ -z "$LOCAL_SIGNING_IDENTITY" ]]; then
+    if [[ "${ALLOW_AD_HOC_SIGNING:-0}" != "1" ]]; then
+      echo "An Apple Development identity is required for a permission-stable local app." >&2
+      echo "Set ALLOW_AD_HOC_SIGNING=1 only for isolated packaging tests." >&2
+      exit 2
+    fi
+    codesign --force --sign - "$APP_DIR"
+    echo "Ad-hoc signed $APP_DIR for an explicitly allowed packaging test."
+  else
+    if [[ "$LOCAL_SIGNING_IDENTITY" == Developer\ ID\ Application:* ]]; then
+      codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$LOCAL_SIGNING_IDENTITY" "$APP_DIR"
+    else
+      codesign --force --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$LOCAL_SIGNING_IDENTITY" "$APP_DIR"
+    fi
+    codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+    echo "Signed $APP_DIR with $LOCAL_SIGNING_IDENTITY"
+  fi
 fi
 
 package_archives
 
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-  if [[ "$SIGNING_IDENTITY" != Developer\ ID\ Application:* ]]; then
-    echo "NOTARY_PROFILE requires a Developer ID Application signing identity." >&2
+  if [[ "$SIGNING_MODE" != "release" ]]; then
+    echo "NOTARY_PROFILE requires SIGNING_MODE=release." >&2
     exit 2
   fi
   xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
@@ -109,3 +169,4 @@ if [[ -n "${NOTARY_PROFILE:-}" ]]; then
 fi
 
 echo "Built $APP_DIR"
+echo "Version $APP_VERSION ($BUILD_NUMBER), commit $GIT_COMMIT, dirty $GIT_DIRTY"

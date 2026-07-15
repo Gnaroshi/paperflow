@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "056e6251dc07cc74f39c1df7ed2060481e623083",
+  "cli": {
+    "rootCommands": ["cleanup", "credentials", "ingest", "local", "taxonomy", "vault", "zotero"],
+    "zoteroCommands": [
+      "apply-localize-attachments",
+      "apply-migration",
+      "apply-plan",
+      "backup",
+      "cleanup-collections",
+      "cleanup-stored-attachments",
+      "detect-duplicates",
+      "dry-run-migration",
+      "enrich-metadata",
+      "explain-ingest",
+      "explain-item",
+      "migration-audit",
+      "plan-localize-attachments",
+      "plan-migration",
+      "plan-organize",
+      "report",
+      "rollback",
+      "scan",
+      "verify-localized-attachments"
+    ],
+    "localCommands": ["apply-import", "audit-import", "classify-new", "cleanup-source-files", "index-zotero", "match-zotero", "plan-import", "scan"],
+    "vaultCommands": ["init", "plan-paths"],
+    "cleanupCommands": ["plan-duplicates", "repair-abstracts", "repair-metadata"],
+    "taxonomyCommands": ["add-golden", "evaluate", "evaluate-golden-set", "explain", "export-golden-set", "test"]
+  },
+  "nativeApp": {
+    "bundleId": "com.paperflow.app",
+    "sections": ["dashboard", "dropShelfSettings", "zoteroOrganize", "localVault", "localFolderImport", "existingAttachments", "cleanupWorkbench", "userGuide", "reports", "settings", "logs"],
+    "confirmationCases": ["applyIngest", "applyMigration", "cleanupDeleteEmpty", "localizeAttachments", "cleanupStoredAttachments", "applyLocalImport", "applyAbstractRepairs", "applyMetadataRepairs", "applySelectedAbstractRepair", "applySelectedMetadataRepair"]
+  },
+  "outputFormats": {
+    "zoteroScan": ["data/zotero_items.jsonl", "data/zotero_items.csv"],
+    "organizationPlan": ["data/organize_plan.json"],
+    "organizationReport": ["data/organize_report.md", "data/organize_report.csv"],
+    "ingest": ["data/ingest_plan.json", "data/ingest_report.md"],
+    "progress": "JSON Lines when --progress-jsonl is selected"
+  },
+  "safety": [
+    "never-edit-zotero-sqlite",
+    "never-automatic-delete",
+    "never-automatic-rename",
+    "local-api-get-only",
+    "dry-run-default",
+    "explicit-apply-boundary",
+    "no-zotero-storage-pdf-upload"
+  ]
+}

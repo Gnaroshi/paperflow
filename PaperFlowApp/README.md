@@ -31,6 +31,13 @@ swift build -c release
 open dist/PaperFlow.app
 ```
 
+Local bundles prefer the installed Developer ID identity so the signing team
+matches public releases; they fall back to Apple Development when necessary.
+Keep the bundle ID and installed path stable, then test protected-folder
+access through the installed app rather than `swift run`. This prevents each
+rebuild from becoming a new ad-hoc code identity; macOS may still require approval
+for a newly requested protected resource or entitlement.
+
 `build_app.sh` creates:
 
 - `dist/PaperFlow.app`
@@ -58,16 +65,24 @@ Check whether this Mac is ready for Developer ID distribution:
 If Developer ID signing credentials are available:
 
 ```bash
-DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" ./build_app.sh
+SIGNING_MODE=release \
+DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" \
+./build_app.sh
 ```
 
 For notarization:
 
 ```bash
+SIGNING_MODE=release \
 DEVELOPER_ID_APPLICATION="Developer ID Application: YOUR NAME (TEAMID)" \
 NOTARY_PROFILE="paperflow-notary" \
 ./build_app.sh
 ```
+
+The app bundle contains `gnaroshi.app.json` and path-free Git build provenance.
+GitHub release packaging must upload the manifest beside the ZIP/DMG. Source
+checkouts may fetch remote refs, but update tooling must not merge, reset, or
+replace a dirty worktree automatically.
 
 ## Set Up
 

@@ -1,6 +1,6 @@
 [project]
 name = "paperflow"
-version = "0.1.0"
+version = "0.2.1"
 description = "CLI tools for planning a safe Zotero AI paper reorganization."
 readme = "README.md"
 requires-python = ">=3.11"

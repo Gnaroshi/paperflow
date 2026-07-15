@@ -22,6 +22,7 @@ let package = Package(
                 "build_app.sh",
                 "install_app.sh",
                 "distribution_check.sh",
+                "Tests",
                 "dist"
             ],
             sources: [
@@ -53,7 +54,9 @@ let package = Package(
                 "UserGuideView.swift",
                 "ReportsView.swift",
                 "ReportParser.swift",
-                "PermissionManager.swift"
+                "PermissionManager.swift",
+                "ShowcaseMode.swift",
+                "ShowcaseView.swift"
             ]
         )
     ]
