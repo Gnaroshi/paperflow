@@ -8,6 +8,14 @@ final class AppState: ObservableObject {
     private var dryRunIngestScope: [String] = []
 
     @Published var selectedSection: AppSection = .dashboard
+    @Published var showTechnicalDetails = false {
+        didSet {
+            defaults.set(showTechnicalDetails, forKey: "showTechnicalDetails")
+            if !showTechnicalDetails && selectedSection == .logs {
+                selectedSection = .settings
+            }
+        }
+    }
     @Published var droppedPDFs: [DroppedPDF] = []
     @Published var invalidDropWarnings: [String] = []
     @Published var defaultMode: DefaultRunMode = .dryRun {
@@ -258,6 +266,7 @@ final class AppState: ObservableObject {
         localImportExcludeExistingZotero = defaults.object(forKey: "localImportExcludeExistingZotero") as? Bool ?? true
         localImportUseGemini = defaults.object(forKey: "localImportUseGemini") as? Bool ?? false
         localImportStopOnGeminiQuota = defaults.object(forKey: "localImportStopOnGeminiQuota") as? Bool ?? true
+        showTechnicalDetails = defaults.object(forKey: "showTechnicalDetails") as? Bool ?? false
         linkedAttachmentInstructionsShown = defaults.bool(forKey: "linkedAttachmentInstructionsShown")
         vaultStatus = VaultStatus(path: defaults.string(forKey: "vaultPath") ?? defaultVault)
         zoteroUserID = KeychainStore.read("ZOTERO_USER_ID")
@@ -356,6 +365,12 @@ final class AppState: ObservableObject {
         if defaults.object(forKey: "showPFWAcrossSpaces") != nil {
             showPFWAcrossSpaces = defaults.bool(forKey: "showPFWAcrossSpaces")
         }
+        let spacesDefaultMigrationApplied = defaults.bool(forKey: "pfwFollowsSpacesDefaultV1")
+        showPFWAcrossSpaces = ScreenPlacementPolicy.showAcrossSpacesValue(
+            currentValue: showPFWAcrossSpaces,
+            migrationApplied: spacesDefaultMigrationApplied
+        )
+        defaults.set(true, forKey: "pfwFollowsSpacesDefaultV1")
 
         if defaults.bool(forKey: "pfwP0DefaultsApplied") == false {
             dropShelfActivationMode = .keyboardShortcutOnly
@@ -363,7 +378,7 @@ final class AppState: ObservableObject {
             displayMode = .focusedMonitor
             focusedMonitorStrategy = .cursorScreen
             hotZoneEnabled = false
-            showPFWAcrossSpaces = false
+            showPFWAcrossSpaces = ScreenPlacementPolicy.showsAcrossSpacesByDefault
             autoHideAfterSuccess = false
             defaults.set(true, forKey: "pfwP0DefaultsApplied")
         }
@@ -416,7 +431,7 @@ final class AppState: ObservableObject {
 
         let missing = missingPrerequisiteGroups(prerequisiteGroups)
         if !missing.isEmpty {
-            return .blocked("Requires \(missing.joined(separator: ", "))")
+            return .blocked("Complete the previous step first")
         }
 
         guard !outputs.isEmpty, outputs.allSatisfy(artifactExists) else {
@@ -464,12 +479,12 @@ final class AppState: ObservableObject {
 
     var zoteroConnectionStatus: String {
         if zoteroUserID.isEmpty || zoteroAPIKey.isEmpty {
-            return "Credentials not configured"
+            return "Setup required"
         }
         if !zoteroUserID.allSatisfy(\.isNumber) {
-            return "User ID must be numeric"
+            return "Account setup needs attention"
         }
-        return "Configured"
+        return "Ready"
     }
 
     var geminiConnectionStatus: String {
@@ -491,13 +506,13 @@ final class AppState: ObservableObject {
             return "Drop at least one PDF first"
         }
         guard shelfStoreInLocalVault, shelfLinkToZoteroNoUpload else {
-            return "Keep local vault and linked attachment only enabled"
+            return "Keep PDFs on this Mac and link them to Zotero"
         }
         guard case .succeeded = runner.status,
               runner.currentCommand.contains("paperflow ingest"),
               runner.currentCommand.contains("--dry-run"),
               dryRunIngestScope == currentIngestScope else {
-            return "Run Dry Run successfully for these exact PDFs first"
+            return "Run Preview for these PDFs first"
         }
         return nil
     }
@@ -506,25 +521,22 @@ final class AppState: ObservableObject {
         guard zoteroVerification.writeAccess else {
             return "Verify a Zotero API key with write access in Settings"
         }
-        let missing = missingPrerequisiteGroups([
-            ["data/backups"],
-            ["data/migration_plan.json"],
-            ["data/apply_preview.json", "data/apply_preview.md"]
-        ])
-        guard missing.isEmpty else {
-            return "Requires \(missing.joined(separator: ", "))"
+        guard artifactExists("data/backups") else { return "Create a current Zotero backup first" }
+        guard artifactExists("data/migration_plan.json") else { return "Complete Plan Migration first" }
+        guard artifactExists("data/apply_preview.json") || artifactExists("data/apply_preview.md") else {
+            return "Complete Preview Migration first"
         }
         guard let planDate = artifactModificationDate("data/migration_plan.json"),
               let previewDate = ["data/apply_preview.json", "data/apply_preview.md"]
                 .compactMap(artifactModificationDate)
                 .max(),
               previewDate >= planDate else {
-            return "Run Dry Run Migration again because the plan changed"
+            return "Run Preview Migration again because the plan changed"
         }
         guard let preview = readJSON(dataURL.appendingPathComponent("apply_preview.json")),
               preview["collection_mode"] as? String == collectionMode.rawValue,
               preview["tag_mode"] as? String == tagMode.rawValue else {
-            return "Run Dry Run Migration again because the collection or tag mode changed"
+            return "Run Preview Migration again because the organization settings changed"
         }
         return nil
     }
@@ -1029,7 +1041,7 @@ final class AppState: ObservableObject {
 
     func runApplyMigration() {
         if let blocker = migrationApplyBlocker {
-            invalidDropWarnings = ["Apply Migration blocked. \(blocker)."]
+            setUserWarning("Migration is not ready. Complete the highlighted step first.", technicalDetail: blocker)
             return
         }
         runZotero(
@@ -1061,7 +1073,7 @@ final class AppState: ObservableObject {
 
     func runDryRunIngest() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
         guard !droppedPDFs.isEmpty else {
@@ -1074,7 +1086,7 @@ final class AppState: ObservableObject {
 
     func runDryRunIngestOfflineFast() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
         guard !droppedPDFs.isEmpty else {
@@ -1087,11 +1099,11 @@ final class AppState: ObservableObject {
 
     func runApplyIngest() {
         guard backend.ingestLinkedLocal else {
-            invalidDropWarnings = ["Backend missing: paperflow ingest --storage-mode linked-local is not implemented yet."]
+            setUserWarning("PDF import is unavailable. Open Advanced & Diagnostics in Settings for recovery details.")
             return
         }
         if let blocker = ingestApplyBlocker {
-            invalidDropWarnings = ["Apply Ingest blocked. \(blocker)."]
+            setUserWarning("Apply is not ready. Run a current Preview first.", technicalDetail: blocker)
             return
         }
         let args = ingestArguments(apply: true, offlineFast: false)
@@ -1116,7 +1128,7 @@ final class AppState: ObservableObject {
     func runLocalFolderScan() {
         let path = localImportPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
-            invalidDropWarnings = ["Choose a folder or enter a terminal path first."]
+            invalidDropWarnings = ["Choose a folder first."]
             return
         }
         var args = ["run", "paperflow", "local", "scan", path]
@@ -1220,10 +1232,10 @@ final class AppState: ObservableObject {
                 }
             }
             try (content + rule).write(to: overridesURL, atomically: true, encoding: .utf8)
-            invalidDropWarnings = ["Saved taxonomy override rule to \(overridesURL.path). Re-running local classification."]
+            setUserWarning("Classification rule saved. Pending papers are being classified again.", technicalDetail: overridesURL.path)
             runLocalFolderClassifyNew()
         } catch {
-            invalidDropWarnings = ["Failed to save taxonomy override rule: \(error.localizedDescription)"]
+            setUserWarning("The classification rule could not be saved. Your existing library was not changed.", technicalDetail: error.localizedDescription)
         }
     }
 
@@ -1241,7 +1253,7 @@ final class AppState: ObservableObject {
     func runApplyLocalImport() {
         guard requirePrerequisites([["data/local_import_plan.json"]], action: "Apply Local Import") else { return }
         guard zoteroVerification.writeAccess else {
-            invalidDropWarnings = ["Apply Local Import blocked: Zotero API key write access is missing or unverified."]
+            invalidDropWarnings = ["Connect Zotero with write access in Settings before adding papers."]
             return
         }
         runUV(
@@ -1257,7 +1269,7 @@ final class AppState: ObservableObject {
 
     func runLocalFolderAuditImport() {
         guard hasGeneratedArtifact(prefix: "local_import_apply_log_", suffix: ".json") else {
-            invalidDropWarnings = ["Audit Import requires a successful local_import_apply_log_*.json file."]
+            invalidDropWarnings = ["Add papers to Zotero before checking the import result."]
             return
         }
         runUV(arguments: ["run", "paperflow", "local", "audit-import"], timeoutSeconds: 1800)
@@ -1296,7 +1308,7 @@ final class AppState: ObservableObject {
             action: "Verify Localized Attachments"
         ) else { return }
         guard hasGeneratedArtifact(prefix: "localize_apply_log_", suffix: ".json") else {
-            invalidDropWarnings = ["Verify Localized Attachments requires a localize_apply_log_*.json file."]
+            invalidDropWarnings = ["Move the planned attachments before running verification."]
             return
         }
         runZotero(arguments: ["verify-localized-attachments"], timeoutSeconds: 1800)
@@ -1438,7 +1450,7 @@ final class AppState: ObservableObject {
         case .applyIngest:
             runApplyIngest()
         case .addToZoteroInbox:
-            invalidDropWarnings = ["Backend missing: add-to-Zotero-Inbox ingest mode is not implemented yet."]
+            invalidDropWarnings = ["This import option is not available yet. Use Preview and Apply instead."]
             dropShelfPhase = .reviewNeeded
             shelfLastResult = "Add to Zotero Inbox requires a backend command."
         case .organizeWithAILibrary:
@@ -1495,7 +1507,7 @@ final class AppState: ObservableObject {
         let key = itemKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty,
               let url = URL(string: "zotero://select/library/items/\(key)") else {
-            invalidDropWarnings = ["No matched Zotero item key for this row."]
+            invalidDropWarnings = ["This row is not linked to a Zotero item yet."]
             return
         }
         NSWorkspace.shared.open(url)
@@ -1564,13 +1576,27 @@ final class AppState: ObservableObject {
     }
 
     private func runMissingBackend(_ message: String) {
-        invalidDropWarnings = [message]
+        setUserWarning(
+            "This feature is unavailable. Open Advanced & Diagnostics in Settings for recovery details.",
+            technicalDetail: message
+        )
+    }
+
+    private func setUserWarning(_ summary: String, technicalDetail: String? = nil) {
+        if showTechnicalDetails, let technicalDetail, !technicalDetail.isEmpty {
+            invalidDropWarnings = ["\(summary)\n\(technicalDetail)"]
+        } else {
+            invalidDropWarnings = [summary]
+        }
     }
 
     private func requirePrerequisites(_ groups: [[String]], action: String) -> Bool {
         let missing = missingPrerequisiteGroups(groups)
         guard missing.isEmpty else {
-            invalidDropWarnings = ["\(action) blocked. Missing \(missing.joined(separator: ", "))."]
+            setUserWarning(
+                "\(action) is not ready. Complete the previous step first.",
+                technicalDetail: "Missing \(missing.joined(separator: ", "))"
+            )
             return false
         }
         return true
@@ -1670,7 +1696,7 @@ final class AppState: ObservableObject {
             try data.write(to: usageURL)
             refreshGeminiUsage()
         } catch {
-            invalidDropWarnings = ["Could not write Gemini usage status: \(error.localizedDescription)"]
+            setUserWarning("Gemini usage status could not be saved. PaperFlow can continue without it.", technicalDetail: error.localizedDescription)
         }
     }
 

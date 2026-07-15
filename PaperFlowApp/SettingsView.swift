@@ -14,14 +14,11 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                 SectionTitle("Settings")
-                Text("경로, 단축키, 계정, Gemini, 로컬 vault 정책을 한 곳에서 관리합니다. API key 원문은 Dashboard와 로그에 표시하지 않습니다.")
+                Text("PDF library, Drop Shelf, Zotero 연결과 macOS 동작을 관리합니다.")
                     .foregroundStyle(PaperFlowTheme.muted)
 
-                settingsCard(title: "PaperFlow", icon: "folder") {
-                    pathRow("Project directory", detail: "CLI, data, config가 있는 PaperFlow repository", text: $state.projectPath, actionTitle: "Choose", action: state.chooseProjectDirectory)
-                    pathRow("uv executable", detail: "Repository 전용 wrapper 권장", text: $state.uvPath, actionTitle: "Choose", action: state.chooseUVExecutable)
-                    pathRow("Managed vault", detail: "새 PDF가 저장되는 linked-local write destination", text: $state.vaultPath, actionTitle: "Choose", action: state.chooseVaultDirectory)
-                    pathRow("Zotero storage", detail: "기존 stored attachment의 read-only source", text: $state.zoteroStoragePath, actionTitle: "Choose", action: state.chooseZoteroStorageDirectory)
+                settingsCard(title: "PDF Library", icon: "folder") {
+                    pathRow("PDF library", detail: "새 PDF를 이 Mac에 보관할 위치", text: $state.vaultPath, actionTitle: "Choose", action: state.chooseVaultDirectory)
                     settingRow("Default ingest", detail: "PDF drop 이후 기본 실행 모드") {
                         Picker("Default ingest", selection: $state.defaultMode) {
                             ForEach(DefaultRunMode.allCases) { mode in Text(mode.label).tag(mode) }
@@ -30,19 +27,14 @@ struct SettingsView: View {
                         .pickerStyle(.segmented)
                         .frame(maxWidth: .infinity)
                     }
-                    settingRow("Storage mode", detail: "Zotero Storage upload 없이 local file link 사용") {
-                        Picker("Storage mode", selection: $state.storageModeSetting) {
-                            ForEach(StorageModeSetting.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: .infinity)
-                    }
                     settingToggle(
-                        "Never upload PDFs",
-                        detail: "항상 local vault에 저장하고 Zotero에는 linked attachment만 생성",
+                        "Keep PDFs on this Mac",
+                        detail: "PDF는 선택한 library에 보관하고 Zotero에는 위치만 연결",
                         isOn: $state.neverUploadPDFsToZoteroStorage
                     )
+                    Text("Zotero data sync는 논문 정보만 동기화합니다. PDF cloud upload는 사용하지 않습니다.")
+                        .font(.callout)
+                        .foregroundStyle(PaperFlowTheme.muted)
                 }
 
                 settingsCard(title: "Drop Shelf", icon: "tray.and.arrow.down") {
@@ -77,8 +69,8 @@ struct SettingsView: View {
                     }
                     settingToggle("Follow across Spaces", detail: "Desktop을 전환해도 PFW를 현재 작업 옆에 유지", isOn: $state.showPFWAcrossSpaces)
                     settingToggle("Auto-hide after success", detail: "성공 결과 표시 후 PFW 숨김", isOn: $state.autoHideAfterSuccess)
-                    settingToggle("Auto dry-run after drop", detail: "Drop 직후 확인 없이 dry-run 실행", isOn: $state.autoDryRunAfterDrop)
-                    settingToggle("Enable hot-zone", detail: "화면 가장자리 drag activation surface", isOn: $state.hotZoneEnabled)
+                    settingToggle("Auto preview after drop", detail: "Drop 직후 PDF를 자동으로 확인", isOn: $state.autoDryRunAfterDrop)
+                    settingToggle("Enable hot-zone", detail: "PDF를 화면 가장자리로 끌면 PFW 표시", isOn: $state.hotZoneEnabled)
                     if state.hotZoneEnabled {
                         settingRow("Hot-zone size", detail: "Activation surface의 폭과 높이") {
                             HStack(spacing: PaperFlowSpacing.md) {
@@ -116,33 +108,26 @@ struct SettingsView: View {
                     }
                 }
 
-                settingsCard(title: "Accounts & API Keys", icon: "key") {
-                    settingRow("Storage", detail: "API key 원문은 UserDefaults에 저장하지 않음") {
-                        Picker("API key storage", selection: $state.apiKeyStorageMode) {
-                            ForEach(APIKeyStorageMode.allCases) { mode in Text(mode.label).tag(mode) }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: .infinity)
-                    }
-
+                settingsCard(title: "Connections", icon: "key") {
                     SettingsSubsectionHeader(
                         "Zotero",
-                        detail: "Write API는 numeric user ID가 필요하며 이메일과 username은 사용할 수 없습니다."
+                        detail: "Apply를 사용하려면 Zotero 연결과 write access가 필요합니다."
                     )
-                    pathRow("Numeric user ID", detail: "API key의 /keys/current 응답에서 자동 조회", text: $state.zoteroUserID, actionTitle: "Fetch", action: state.verifyAndSaveZoteroAPIKey)
+                    pathRow("Account ID", detail: "API key 확인 시 자동으로 가져옵니다.", text: $state.zoteroUserID, actionTitle: "Fetch", action: state.verifyAndSaveZoteroAPIKey)
                     if state.apiKeyStorageMode == .keychain {
                         secureInputRow("API key", detail: "Keychain에 저장하고 접근 권한을 검증", text: $state.pendingZoteroAPIKey, actionTitle: "Verify & Save", action: state.verifyAndSaveZoteroAPIKey)
                         keyValue("Stored key", state.redactedAPIKey)
                     } else {
                         settingRow("API key") {
-                            Text("ZOTERO_API_KEY environment variable")
+                            Text("Managed outside PaperFlow. Open Advanced & Diagnostics to change this mode.")
                                 .foregroundStyle(PaperFlowTheme.muted)
                         }
                     }
-                    accessGrid
+                    if state.showTechnicalDetails {
+                        accessGrid
+                    }
                     if !state.zoteroVerification.writeAccess {
-                        WarningBox(text: "Zotero write access가 없으면 apply-migration을 막습니다.")
+                        WarningBox(text: "Zotero에서 변경을 적용하려면 write access가 필요합니다.")
                     }
 
                     Rectangle()
@@ -155,7 +140,7 @@ struct SettingsView: View {
                         keyValue("Stored key", state.redactedGeminiAPIKey)
                     } else {
                         settingRow("API key") {
-                            Text("GEMINI_API_KEY environment variable")
+                            Text("Managed outside PaperFlow. Open Advanced & Diagnostics to change this mode.")
                                 .foregroundStyle(PaperFlowTheme.muted)
                         }
                     }
@@ -176,46 +161,87 @@ struct SettingsView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    settingToggle("Enable Gemini cleanup", detail: "기본 deterministic workflow 이후에만 호출", isOn: $state.geminiCleanupEnabled)
-                    settingToggle("Stop on quota limit", detail: "429 RESOURCE_EXHAUSTED 발생 시 batch 중단", isOn: $state.stopOnGeminiQuotaHit)
-                    geminiUsageGrid
-                }
-
-                settingsCard(title: "Zotero Migration Defaults", icon: "books.vertical") {
-                    settingRow("Collection mode", detail: "Migration apply 시 기존 collection 처리 방식") {
-                        Picker("Collection mode", selection: $state.collectionMode) {
-                            ForEach(CollectionMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity)
-                    }
-                    settingRow("Tag mode", detail: "Managed prefix tag의 교체 범위") {
-                        Picker("Tag mode", selection: $state.tagMode) {
-                            ForEach(TagMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity)
-                    }
-                    settingRow("Apply safety") {
-                        Label("Typed confirmation required", systemImage: "lock.fill")
-                            .foregroundStyle(PaperFlowTheme.muted)
+                    settingToggle("Enable Gemini cleanup", detail: "기본 분류로 결정하기 어려운 경우에만 사용", isOn: $state.geminiCleanupEnabled)
+                    if state.showTechnicalDetails {
+                        settingToggle("Stop on quota limit", detail: "Stop a batch when the provider rejects more requests", isOn: $state.stopOnGeminiQuotaHit)
+                        geminiUsageGrid
                     }
                 }
 
-                settingsCard(title: "Cleanup Safety", icon: "checklist") {
-                    settingToggle("Gemini abstract extraction", detail: "PDF text에서 verbatim abstract 추출에만 사용", isOn: $state.enableGeminiAbstractExtraction)
-                    settingToggle("Gemini metadata extraction", detail: "제공된 text에서 field를 추출하며 생성하지 않음", isOn: $state.enableGeminiMetadataExtraction)
-                    settingToggle("Gemini classification review", detail: "낮은 confidence classification만 검토", isOn: $state.enableGeminiClassificationReview)
-                    settingToggle("Manual approval required", detail: "Gemini repair 결과를 자동 적용하지 않음", isOn: $state.requireManualApprovalForGeminiRepairs)
-                    settingToggle("Preserve existing abstract", detail: "기존 non-empty abstract를 덮어쓰지 않음", isOn: $state.neverOverwriteExistingAbstract)
-                    settingToggle("Preserve duplicate reading work", detail: "note, highlight, annotation이 있는 duplicate를 삭제하지 않음", isOn: $state.neverDeleteDuplicateWithReadingWork)
+                settingsCard(title: "Advanced & Diagnostics", icon: "wrench.and.screwdriver") {
+                    settingToggle(
+                        "Show technical details",
+                        detail: "경로, raw status, reports와 logs를 표시합니다. 기본 화면에는 필요하지 않은 정보입니다.",
+                        isOn: $state.showTechnicalDetails
+                    )
+                    if state.showTechnicalDetails {
+                        pathRow("Project directory", detail: "PaperFlow source and local data", text: $state.projectPath, actionTitle: "Choose", action: state.chooseProjectDirectory)
+                        pathRow("uv executable", detail: "Python command runner", text: $state.uvPath, actionTitle: "Choose", action: state.chooseUVExecutable)
+                        pathRow("Zotero storage", detail: "Existing Zotero-managed PDF source", text: $state.zoteroStoragePath, actionTitle: "Choose", action: state.chooseZoteroStorageDirectory)
+                        settingRow("API key storage") {
+                            Picker("API key storage", selection: $state.apiKeyStorageMode) {
+                                ForEach(APIKeyStorageMode.allCases) { mode in Text(mode.label).tag(mode) }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: .infinity)
+                        }
+                        settingRow("Storage mode") {
+                            Picker("Storage mode", selection: $state.storageModeSetting) {
+                                ForEach(StorageModeSetting.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: .infinity)
+                        }
+                        SettingsActionBar {
+                            Button("Open Reports") { state.selectedSection = .reports }
+                            Button("Open Logs") { state.selectedSection = .logs }
+                            Button("Open Project") { state.openProjectFolder() }
+                            Button("Open App Logs") { state.openAppLogsFolder() }
+                        }
+                    }
+                }
+
+                if state.showTechnicalDetails {
+                    settingsCard(title: "Migration Defaults", icon: "books.vertical") {
+                        settingRow("Collection mode", detail: "How Apply treats existing collections") {
+                            Picker("Collection mode", selection: $state.collectionMode) {
+                                ForEach(CollectionMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                        }
+                        settingRow("Tag mode", detail: "Which managed tags Apply replaces") {
+                            Picker("Tag mode", selection: $state.tagMode) {
+                                ForEach(TagMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                        }
+                        settingRow("Apply safety") {
+                            Label("Current backup and preview required", systemImage: "lock.fill")
+                                .foregroundStyle(PaperFlowTheme.muted)
+                        }
+                    }
+
+                    settingsCard(title: "Cleanup Safety", icon: "checklist") {
+                        settingToggle("Gemini abstract extraction", detail: "Extract only from supplied PDF text", isOn: $state.enableGeminiAbstractExtraction)
+                        settingToggle("Gemini metadata extraction", detail: "Extract fields without inventing values", isOn: $state.enableGeminiMetadataExtraction)
+                        settingToggle("Gemini classification review", detail: "Review only low-confidence classification", isOn: $state.enableGeminiClassificationReview)
+                        settingToggle("Manual approval required", detail: "Never apply Gemini repairs automatically", isOn: $state.requireManualApprovalForGeminiRepairs)
+                        settingToggle("Preserve existing abstract", detail: "Never replace a non-empty abstract", isOn: $state.neverOverwriteExistingAbstract)
+                        settingToggle("Preserve duplicate reading work", detail: "Keep duplicates that contain notes or annotations", isOn: $state.neverDeleteDuplicateWithReadingWork)
+                    }
                 }
 
                 settingsCard(title: "Permissions & macOS", icon: "lock") {
                     keyValue("Files and folders", permissions.filesAndFolders)
                     keyValue("Accessibility", permissions.accessibility)
-                    keyValue("Input monitoring", permissions.inputMonitoring)
-                    keyValue("Login item", permissions.loginItem)
+                    if state.showTechnicalDetails {
+                        keyValue("Input monitoring", permissions.inputMonitoring)
+                        keyValue("Login item", permissions.loginItem)
+                    }
                     settingToggle("Launch at login", detail: "macOS login 후 PaperFlow 자동 실행", isOn: Binding(
                         get: { state.launchAtLogin },
                         set: { state.setLaunchAtLogin($0) }

@@ -5,16 +5,16 @@ struct LocalVaultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaperFlowSpacing.md) {
-            SectionTitle("Storage & Sources")
-            Text("새 PDF의 write destination, 기존 Zotero attachment source, Downloads import source를 구분해 관리합니다.")
+            SectionTitle("PDF Library")
+            Text("새 PDF를 저장할 곳, 기존 Zotero PDF와 가져올 폴더를 관리합니다.")
                 .foregroundStyle(PaperFlowTheme.muted)
 
             SurfaceSection(
-                title: "PaperFlow Managed Vault",
-                subtitle: "새 PDF를 복사·정리하는 기본 목적지입니다. Zotero에는 이 파일의 linked attachment를 생성합니다."
+                title: "PDF Library on This Mac",
+                subtitle: "새 PDF를 보관하고 Zotero에서 바로 열 수 있도록 연결합니다."
             ) {
                 locationHeader(
-                    title: "Active write destination",
+                    title: "Current PDF library",
                     path: state.vaultPath,
                     summary: state.vaultStatus.exists
                         ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)"
@@ -23,67 +23,67 @@ struct LocalVaultView: View {
                     color: state.vaultStatus.exists ? PaperFlowTheme.mint : PaperFlowTheme.amber
                 )
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: PaperFlowSpacing.xs)], spacing: PaperFlowSpacing.xs) {
-                    InfoTile(title: "Storage mode", value: "linked-local")
-                    InfoTile(title: "Zotero Storage upload", value: "Never")
+                    InfoTile(title: "PDF location", value: "On this Mac")
+                    InfoTile(title: "Cloud PDF upload", value: "Off")
                     InfoTile(title: "Last ingest", value: state.vaultStatus.lastIngest)
                 }
                 Label(
-                    "Zotero Linked Attachment Base Directory는 하나이므로 기본 write destination도 하나를 유지합니다. 다른 폴더는 import source로 등록합니다.",
+                    "새 PDF는 이 위치에 저장됩니다. 다른 폴더의 PDF는 Import에서 가져올 수 있습니다.",
                     systemImage: "info.circle"
                 )
                 .font(.caption)
                 .foregroundStyle(PaperFlowTheme.muted)
                 SettingsActionBar {
-                    Button("Init Vault") { state.runVaultInit() }
+                    Button("Set Up Library") { state.runVaultInit() }
                         .disabled(!state.backend.vaultCommands || state.runner.isRunning)
-                    Button("Choose Destination") { state.chooseVaultDirectory() }
-                    Button("Plan Vault Paths") { state.runVaultPlanPaths() }
+                    Button("Choose Location") { state.chooseVaultDirectory() }
+                    Button("Preview File Locations") { state.runVaultPlanPaths() }
                         .disabled(
                             !state.backend.vaultCommands
                             || state.runner.isRunning
                             || !state.artifactExists("data/migration_plan.json")
                         )
-                    Button("Open Vault") { state.openVault() }
+                    Button("Open PDF Library") { state.openVault() }
                     Button("Refresh") { state.refreshStatus() }
                 }
                 if !state.artifactExists("data/migration_plan.json") {
-                    Label("Plan Vault Paths requires data/migration_plan.json. Run Zotero Organize → Plan Migration first.", systemImage: "lock.fill")
+                    Label("파일 위치를 미리 보려면 Zotero Organize에서 Plan Migration을 먼저 실행하세요.", systemImage: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(PaperFlowTheme.amber)
                 }
                 SettingsToggleRow(
-                    "Base directory configured",
+                    "Zotero can open this location",
                     detail: "Zotero → Settings → Advanced → Files and Folders에서 위 경로를 선택",
                     isOn: $state.linkedAttachmentInstructionsShown
                 )
             }
 
             SurfaceSection(
-                title: "Existing Zotero Storage",
-                subtitle: "Zotero가 관리하는 stored attachment 영역입니다. PaperFlow는 이 폴더를 직접 수정하지 않습니다."
+                title: "Existing Zotero PDFs",
+                subtitle: "Zotero가 이미 관리하는 PDF입니다. PaperFlow는 원본을 직접 수정하지 않습니다."
             ) {
                 locationHeader(
-                    title: "Zotero managed · read-only source",
+                    title: "Existing Zotero PDF location",
                     path: state.zoteroStorageStatus.path,
                     summary: state.zoteroStorageStatus.summary,
                     symbol: "books.vertical.fill",
                     color: PaperFlowTheme.sky
                 )
-                WarningBox(text: "Stored PDF를 local vault로 옮길 때는 Existing Attachments의 Plan → Apply → Verify workflow를 사용합니다. 기존 attachment, note, highlight, annotation은 자동 삭제하지 않습니다.")
+                WarningBox(text: "기존 PDF를 옮길 때는 Move Existing PDFs의 Plan → Apply → Verify 순서를 사용합니다. 읽기 기록은 자동으로 삭제하지 않습니다.")
                 SettingsActionBar {
                     Button("Open Zotero Storage") { state.openFolder(path: state.zoteroStoragePath) }
                         .disabled(!state.zoteroStorageStatus.exists)
                     Button("Choose Location") { state.chooseZoteroStorageDirectory() }
-                    Button("Index Zotero Attachments") { state.runIndexZoteroStorage() }
+                    Button("Check Existing PDFs") { state.runIndexZoteroStorage() }
                         .disabled(state.runner.isRunning)
-                    Button("Plan Localization") { state.runPlanLocalizeAttachments() }
+                    Button("Plan Move") { state.runPlanLocalizeAttachments() }
                         .disabled(state.runner.isRunning || !state.backend.localizeAttachmentCommands)
                 }
             }
 
             SurfaceSection(
-                title: "Import Sources",
-                subtitle: "Downloads나 다른 폴더는 임시 source입니다. 새 논문은 vault에 복사한 뒤 Zotero item과 linked attachment로 추가합니다."
+                title: "Import Folders",
+                subtitle: "Downloads나 선택한 폴더에서 새 논문을 찾아 PDF library와 Zotero에 추가합니다."
             ) {
                 locationHeader(
                     title: "Downloads",
@@ -93,7 +93,7 @@ struct LocalVaultView: View {
                     color: PaperFlowTheme.lilac
                 )
                 Label(
-                    "Scan은 dry-run이며 파일을 복사하거나 Zotero에 쓰지 않습니다. Local Folder Import의 Apply Import에서만 vault copy와 Zotero write가 실행됩니다.",
+                    "Scan은 원본과 Zotero를 변경하지 않습니다. Apply Import를 선택할 때만 논문을 추가합니다.",
                     systemImage: "checkmark.shield"
                 )
                 .font(.caption)
@@ -112,7 +112,7 @@ struct LocalVaultView: View {
             }
 
             if !state.backend.vaultCommands {
-                WarningBox(text: "Backend missing: paperflow vault init / plan-paths.")
+                WarningBox(text: "Storage tools are unavailable. Open Advanced diagnostics in Settings for recovery details.")
             }
         }
     }
@@ -132,11 +132,13 @@ struct LocalVaultView: View {
             VStack(alignment: .leading, spacing: PaperFlowSpacing.xxs) {
                 Text(title)
                     .font(.callout.weight(.semibold))
-                Text(path)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(PaperFlowTheme.muted)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if state.showTechnicalDetails {
+                    Text(path)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(PaperFlowTheme.muted)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: PaperFlowSpacing.sm)
             Text(summary)

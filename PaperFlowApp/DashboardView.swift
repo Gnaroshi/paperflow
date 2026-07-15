@@ -5,108 +5,85 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline) {
-                    SectionTitle("Dashboard")
-                    Spacer()
-                    modelPicker
+            SectionTitle("Library")
+            heroStatusCard
+
+            if reviewItemCount == 0 {
+                SurfaceSection(title: "Review") {
+                    Label("Nothing needs your attention", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(PaperFlowTheme.mint)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle("Dashboard")
-                    modelPicker
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 10)], spacing: 10) {
+                    if state.dashboard.duplicateCandidates > 0 {
+                        MetricTile(title: "Duplicates", value: "\(state.dashboard.duplicateCandidates)", tint: .purple)
+                    }
+                    if state.dashboard.missingMetadataItems > 0 {
+                        MetricTile(title: "Missing metadata", value: "\(state.dashboard.missingMetadataItems)", tint: .orange)
+                    }
+                    if state.dashboard.missingAbstractItems > 0 {
+                        MetricTile(title: "Missing abstracts", value: "\(state.dashboard.missingAbstractItems)", tint: .pink)
+                    }
+                    if state.dashboard.lowConfidenceItems > 0 {
+                        MetricTile(title: "Needs classification", value: "\(state.dashboard.lowConfidenceItems)", tint: .mint)
+                    }
                 }
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    heroStatusCard
-                    connectionStatusCards
-                        .frame(width: 240)
+            if state.showTechnicalDetails {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
+                    StatusCard(title: "Migration", rows: [
+                        ("Latest", state.dashboard.latestMigrationStatus),
+                        ("Apply", state.dashboard.latestApplyStatus),
+                        ("Audit", state.dashboard.latestMigrationAuditStatus)
+                    ])
+                    StatusCard(title: "Cleanup", rows: [
+                        ("Cleanup", state.dashboard.latestCleanupStatus),
+                        ("Stored PDFs", state.dashboard.latestStoredPDFLocalizationStatus),
+                        ("Last ingest", state.vaultStatus.lastIngest)
+                    ])
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    heroStatusCard
-                    connectionStatusCards
-                }
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 10)], spacing: 10) {
-                MetricTile(title: "Planned", value: "\(state.dashboard.plannedItems)", tint: .blue)
-                MetricTile(title: "Duplicates", value: "\(state.dashboard.duplicateCandidates)", tint: .purple)
-                MetricTile(title: "Missing metadata", value: "\(state.dashboard.missingMetadataItems)", tint: .orange)
-                MetricTile(title: "Missing abstracts", value: "\(state.dashboard.missingAbstractItems)", tint: .pink)
-                MetricTile(title: "Low confidence", value: "\(state.dashboard.lowConfidenceItems)", tint: .mint)
-                MetricTile(title: "Non-paper", value: "\(state.dashboard.nonPaperItems)", tint: .gray)
-                MetricTile(title: "Updates", value: "\(state.dashboard.itemUpdates)", tint: .indigo)
-                MetricTile(title: "Collections", value: "\(state.dashboard.collectionsToCreate)", tint: .teal)
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], spacing: 10) {
-                StatusCard(title: "Migration", rows: [
-                    ("Latest", state.dashboard.latestMigrationStatus),
-                    ("Apply", state.dashboard.latestApplyStatus),
-                    ("Audit", state.dashboard.latestMigrationAuditStatus)
-                ])
-                StatusCard(title: "Cleanup", rows: [
-                    ("Cleanup", state.dashboard.latestCleanupStatus),
-                    ("Stored PDFs", state.dashboard.latestStoredPDFLocalizationStatus),
-                    ("Last ingest", state.vaultStatus.lastIngest)
-                ])
-                StatusCard(title: "Gemini quota", rows: [
-                    ("Status", state.geminiUsage.quotaStatus),
-                    ("Requests", "\(state.geminiUsage.requestCount)"),
-                    ("Tokens", "\(state.geminiUsage.totalTokens)")
-                ])
             }
 
             if state.geminiUsage.failedRateLimitCalls > 0 {
-                WarningBox(text: "Gemini Flash is currently rate-limited. Try later or reduce batch size.")
+                WarningBox(text: "Optional AI assistance is temporarily unavailable. PaperFlow can continue without it.")
             }
-
-            SyncWarningBox()
         }
     }
 
-    private var modelPicker: some View {
-        Picker("Gemini model", selection: $state.geminiModel) {
-            Text("2.5 Flash").tag("gemini-2.5-flash")
-            Text("2.5 Flash Lite").tag("gemini-2.5-flash-lite")
-            Text("2.0 Flash").tag("gemini-2.0-flash")
-            Text("Custom").tag("custom")
-        }
-        .labelsHidden()
-        .frame(width: 210)
-    }
-
-    private var connectionStatusCards: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
-            compactStatus(title: "Zotero", value: state.zoteroVerification.verified ? "Verified" : "Unverified", detail: "Write: \(state.zoteroVerification.writeAccess ? "yes" : "no")", icon: "books.vertical")
-            compactStatus(title: "Gemini", value: state.geminiVerification.verified ? "Verified" : state.geminiConnectionStatus, detail: state.selectedGeminiModel, icon: "sparkles")
-        }
+    private var reviewItemCount: Int {
+        state.dashboard.duplicateCandidates
+            + state.dashboard.missingMetadataItems
+            + state.dashboard.missingAbstractItems
+            + state.dashboard.lowConfidenceItems
     }
 
     private var heroStatusCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("PaperFlow Local Library", systemImage: "doc.text.magnifyingglass")
+            Label("Paper library", systemImage: "doc.text.magnifyingglass")
                 .font(.headline)
-            Text(state.projectPath)
-                .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(PaperFlowTheme.muted)
             HStack {
-                Label(state.vaultStatus.exists ? "Vault ready" : "Vault missing", systemImage: state.vaultStatus.exists ? "externaldrive.fill" : "externaldrive.badge.xmark")
+                Label(state.vaultStatus.exists ? "PDF library ready" : "Choose a PDF library", systemImage: state.vaultStatus.exists ? "externaldrive.fill" : "externaldrive.badge.xmark")
                 Spacer()
                 Text(state.vaultStatus.exists ? "\(state.vaultStatus.pdfCount) PDFs · \(state.vaultStatus.totalSizeLabel)" : "로컬 PDF 저장 폴더 없음")
                     .foregroundStyle(PaperFlowTheme.muted)
             }
             .font(.callout)
+            Label(
+                state.zoteroVerification.writeAccess ? "Zotero is connected" : "Zotero setup is required before Apply",
+                systemImage: state.zoteroVerification.writeAccess ? "checkmark.circle.fill" : "exclamationmark.circle"
+            )
+            .font(.callout)
+            .foregroundStyle(state.zoteroVerification.writeAccess ? PaperFlowTheme.mint : PaperFlowTheme.amber)
             HStack {
                 if state.vaultStatus.exists {
-                    Button("Open Vault") { state.openVault() }
+                    Button("Open PDF Library") { state.openVault() }
                 } else {
-                    Button("Vault 초기화") { state.runVaultInit() }
+                    Button("Choose PDF Library") { state.chooseVaultDirectory() }
                 }
-                Button("Open Reports") { state.openReportsFolder() }
+                if !state.zoteroVerification.writeAccess {
+                    Button("Set Up Zotero") { state.selectedSection = .settings }
+                }
                 Button("Refresh") { state.refreshStatus() }
             }
             .buttonStyle(.bordered)
@@ -116,37 +93,6 @@ struct DashboardView: View {
         .paperFlowCard(tint: PaperFlowTheme.mint, radius: 18, emphasize: true)
     }
 
-    private func compactStatus(title: String, value: String, detail: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon)
-                .font(.caption)
-                .foregroundStyle(PaperFlowTheme.muted)
-            Text(value)
-                .font(.headline)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(PaperFlowTheme.muted)
-                .lineLimit(1)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-        .paperFlowCard(tint: icon == "sparkles" ? PaperFlowTheme.lilac : PaperFlowTheme.sky, radius: 14)
-    }
-}
-
-struct SyncWarningBox: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Zotero sync warning")
-                .font(.headline)
-            Text("Data sync과 file sync는 별개입니다. 로컬 PDF workflow에서는 file sync를 꺼야 Zotero Storage 300MB 제한을 피할 수 있습니다.")
-            Text("Web API로 migration을 apply했다면 Zotero Desktop에서 data sync가 필요할 수 있습니다.")
-        }
-        .font(.callout)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .paperFlowCard(tint: PaperFlowTheme.amber, radius: 12)
-    }
 }
 
 private struct MetricTile: View {

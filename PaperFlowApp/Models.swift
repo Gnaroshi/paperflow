@@ -4,16 +4,20 @@ enum AppSection: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case dropShelfSettings = "Drop Shelf Settings"
     case zoteroOrganize = "Zotero Organize"
-    case localVault = "Local Vault"
+    case localVault = "PDF Library"
     case localFolderImport = "Local Folder Import"
-    case existingAttachments = "Existing Attachments"
-    case cleanupWorkbench = "Cleanup Workbench"
+    case existingAttachments = "Move Existing PDFs"
+    case cleanupWorkbench = "Review & Cleanup"
     case userGuide = "User Guide"
     case reports = "Reports"
     case settings = "Settings"
     case logs = "Logs"
 
     var id: String { rawValue }
+
+    static func visibleCases(showTechnicalDetails: Bool) -> [AppSection] {
+        allCases.filter { showTechnicalDetails || $0 != .logs }
+    }
 
     var symbolName: String {
         switch self {
@@ -61,7 +65,7 @@ enum DefaultRunMode: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .dryRun:
-            return "Dry Run"
+            return "Preview"
         case .apply:
             return "Apply"
         }
@@ -215,6 +219,10 @@ enum PFWMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static func visibleCases(showTechnicalDetails: Bool) -> [PFWMode] {
+        allCases.filter { showTechnicalDetails || $0 != .logs }
+    }
+
     var label: String {
         switch self {
         case .drop:
@@ -362,9 +370,9 @@ enum DropShelfAction: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .dryRunIngest:
-            return "Dry Run Ingest"
+            return "Preview PDFs"
         case .applyIngest:
-            return "Apply Ingest"
+            return "Add to Zotero"
         case .addToZoteroInbox:
             return "Add to Zotero Inbox"
         case .organizeWithAILibrary:
@@ -482,9 +490,20 @@ enum ConfirmationKind: Identifiable {
         case .applyMetadataRepairs:
             return "Apply Metadata Repairs"
         case .applySelectedAbstractRepair(let itemKey):
-            return "Apply Abstract Repair: \(itemKey)"
+            _ = itemKey
+            return "Apply Abstract Repair"
         case .applySelectedMetadataRepair(let itemKey, _):
-            return "Apply Metadata Repair: \(itemKey)"
+            _ = itemKey
+            return "Apply Metadata Repair"
+        }
+    }
+
+    var requiresTypedConfirmation: Bool {
+        switch self {
+        case .cleanupDeleteEmpty, .cleanupStoredAttachments:
+            return true
+        default:
+            return false
         }
     }
 
@@ -529,11 +548,11 @@ enum ConfirmationKind: Identifiable {
             return "This updates Zotero abstractNote only for high-confidence repairs and should not overwrite existing abstracts unless backend options explicitly allow it."
         case .applyMetadataRepairs:
             return "This updates Zotero metadata fields from reviewed repair proposals. It must not replace stronger metadata with weaker metadata."
-        case .applySelectedAbstractRepair(let itemKey):
-            return "This updates Zotero abstractNote for item \(itemKey) only if the repair is high-confidence."
-        case .applySelectedMetadataRepair(let itemKey, let fields):
+        case .applySelectedAbstractRepair:
+            return "This updates the selected paper's abstract only when the proposed repair is high-confidence."
+        case .applySelectedMetadataRepair(_, let fields):
             let fieldList = fields.isEmpty ? "the selected repair fields" : fields.joined(separator: ", ")
-            return "This updates \(fieldList) for Zotero item \(itemKey) only."
+            return "This updates \(fieldList) for the selected paper only."
         }
     }
 }

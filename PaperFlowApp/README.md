@@ -6,7 +6,8 @@ optional screen-edge hot-zones, plus a Raycast-style command window and a full
 control-panel window.
 The app does not classify papers or rewrite Zotero logic in Swift. It passes
 commands and paths to the CLI, parses local reports, and keeps apply operations
-behind typed confirmations.
+behind current previews, backups, explicit Apply actions, and stronger confirmation
+only for irreversible cleanup.
 
 ## Local-first Zotero model
 
@@ -189,25 +190,18 @@ Default shortcuts:
 
 ## Safety
 
-Apply Migration requires typing:
+Routine PDF ingest and migration Apply do not require a repeated typed phrase.
+They remain blocked until their current preview, scope and required backup are
+verified. Developer details are hidden by default and can be enabled from
+Settings > Advanced & Diagnostics.
 
-```text
-REPLACE MY ZOTERO COLLECTIONS
-```
-
-PDF ingest apply requires typing:
-
-```text
-INGEST LOCAL PDFS
-```
-
-Stored attachment cleanup requires typing:
+Irreversible stored attachment cleanup requires typing:
 
 ```text
 DELETE OLD STORED PDF ATTACHMENTS
 ```
 
-Abstract and metadata cleanup applies require typing:
+Other high-risk bulk cleanup actions may require typing:
 
 ```text
 APPLY ABSTRACT REPAIRS

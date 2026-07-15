@@ -9,10 +9,11 @@ must not use decoration where status, evidence, or safety information belongs.
 Design priorities, in order:
 
 1. Preserve user work and make destructive scope explicit.
-2. Show workflow order, prerequisites, and generated artifacts.
-3. Keep every control usable from the minimum supported window size.
-4. Make current state and next action obvious within three seconds.
-5. Use color as a status signal, not as background decoration.
+2. Keep developer-only and decision-irrelevant information out of the default UI.
+3. Show workflow order, prerequisites, and user-relevant results.
+4. Keep every control usable from the minimum supported window size.
+5. Make current state and next action obvious within three seconds.
+6. Use color as a status signal, not as background decoration.
 
 ## 2. Layout Contract
 
@@ -49,6 +50,19 @@ Every screen follows the same order:
 
 Avoid placing unrelated buttons in one undifferentiated grid. A button that
 depends on another operation must display its prerequisite and disabled reason.
+
+### User-facing information boundary
+
+- Default screens show only purpose, prerequisite, blocker, progress, result,
+  preservation and next action.
+- Repository paths, executables, raw commands, PID, hashes, schema/API/backend
+  terms, artifact filenames and raw logs are hidden by default.
+- Those values are available only after enabling `Settings > Advanced &
+  Diagnostics > Show technical details`, or through an explicit report/log action.
+- Errors lead with a plain-language summary, what was preserved and how to recover.
+  Raw output remains copyable in diagnostics.
+- Safety, privacy, destructive scope and recovery instructions are never hidden as
+  technical detail.
 
 ## 4. Surface System
 
@@ -91,7 +105,8 @@ one command prevents later commands in the same sequence from starting.
 ## 7. Safety Communication
 
 - Dry-run and apply actions never share equal visual weight.
-- Apply controls live in a separate danger section with typed confirmation.
+- Routine apply controls require a current preview and backup but do not require a
+  repeated typed phrase. Irreversible cleanup keeps stronger confirmation.
 - The UI states what changes and what is preserved.
 - Missing credentials, missing plans, stale plans, and missing verification
   reports are blocking conditions, not transient toast messages.
@@ -105,6 +120,7 @@ one command prevents later commands in the same sequence from starting.
 - Interactive targets are at least 30 pt high.
 - Paths and command output use monospaced text with truncation or scrolling.
 - Labels never depend on hover-only tooltips for essential meaning.
+- Technical detail is opt-in and off by default.
 
 ## 9. Review Checklist
 

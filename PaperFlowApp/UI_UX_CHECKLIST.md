@@ -25,6 +25,17 @@ queued, processing, success, failure, Status, Recent, Zotero, and Logs modes.
 - [x] Muted text remains legible against every background.
 - [x] Empty space supports grouping and does not separate related controls.
 
+## User-facing Information Boundary
+
+- [x] Default navigation hides Logs and developer-only surfaces.
+- [x] Dashboard does not show repository paths, raw provider values, commands, or repeated sync prose.
+- [x] PFW hides Logs, PID, command, working directory, raw output, artifact names, and storage internals by default.
+- [x] Local Folder Import hides paths, item keys, confidence, raw match reasons, and temporary overrides by default.
+- [x] Settings exposes one opt-in Advanced & Diagnostics boundary for paths, raw status, reports, and logs.
+- [x] User Guide contains no CLI command, config path, artifact filename, or developer workflow.
+- [x] Errors retain a plain summary, preserved state, recovery action, and optional diagnostic detail.
+- [x] Focused copy and mode-filter tests prevent technical detail from returning to default UI.
+
 ## Interaction and State
 
 - [x] Every button has a visible purpose and predictable result.
@@ -65,7 +76,7 @@ queued, processing, success, failure, Status, Recent, Zotero, and Logs modes.
 - [x] `HeaderView`: compact icon mode and no trailing clipping.
 - [x] `PersistentNotice`: wraps long errors and remains dismissible.
 - [x] `CommandActivityDock`: collapsed/running/expanded states.
-- [x] Confirmation sheets: fit, explain scope, require exact text.
+- [x] Confirmation sheets: routine Apply uses current preview/backup gates; irreversible cleanup retains exact text.
 
 ### Primary Tabs
 

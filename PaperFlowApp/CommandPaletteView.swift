@@ -13,32 +13,32 @@ struct CommandPaletteView: View {
             PaletteAction(id: "ingest", title: "Ingest PDFs", subtitle: "Show floating drop shelf", destructive: false) {
                 AppServices.shared.shelfController?.showExpanded()
             },
-            PaletteAction(id: "backup", title: "Backup Zotero", subtitle: "uv run paperflow zotero backup", destructive: false) {
+            PaletteAction(id: "backup", title: "Backup Zotero", subtitle: "Create a restore point before making changes", destructive: false) {
                 state.runBackupZotero()
             },
-            PaletteAction(id: "enrich", title: "Enrich Metadata", subtitle: "uv run paperflow zotero enrich-metadata", destructive: false) {
+            PaletteAction(id: "enrich", title: "Enrich Metadata", subtitle: "Find missing paper information", destructive: false) {
                 state.runEnrichMetadata()
             },
-            PaletteAction(id: "dedupe", title: "Detect Duplicates", subtitle: "uv run paperflow zotero detect-duplicates", destructive: false) {
+            PaletteAction(id: "dedupe", title: "Detect Duplicates", subtitle: "Find papers that may be duplicated", destructive: false) {
                 state.runDetectDuplicates()
             },
-            PaletteAction(id: "plan", title: "Plan Migration", subtitle: "uv run paperflow zotero plan-migration", destructive: false) {
+            PaletteAction(id: "plan", title: "Plan Migration", subtitle: "Prepare collection and tag changes", destructive: false) {
                 state.runPlanMigration()
             },
-            PaletteAction(id: "dry-run-migration", title: "Dry Run Migration", subtitle: "uv run paperflow zotero dry-run-migration", destructive: false) {
+            PaletteAction(id: "dry-run-migration", title: "Preview Migration", subtitle: "Review the result without changing Zotero", destructive: false) {
                 state.runDryRunMigration()
             },
             PaletteAction(id: "cleanup-workbench", title: "Open Cleanup Workbench", subtitle: "Review Missing Abstract, Missing Metadata, Duplicates", destructive: false) {
                 state.selectedSection = .cleanupWorkbench
                 AppServices.shared.openMainWindow()
             },
-            PaletteAction(id: "repair-abstracts", title: "Repair Abstracts Dry Run", subtitle: "uv run paperflow cleanup repair-abstracts --dry-run", destructive: false) {
+            PaletteAction(id: "repair-abstracts", title: "Preview Abstract Repairs", subtitle: "Review proposed abstract changes", destructive: false) {
                 state.runRepairAbstractsDryRun()
             },
-            PaletteAction(id: "repair-metadata", title: "Repair Metadata Dry Run", subtitle: "uv run paperflow cleanup repair-metadata --dry-run", destructive: false) {
+            PaletteAction(id: "repair-metadata", title: "Preview Metadata Repairs", subtitle: "Review proposed metadata changes", destructive: false) {
                 state.runRepairMetadataDryRun()
             },
-            PaletteAction(id: "migration-audit", title: "Migration Audit", subtitle: "uv run paperflow zotero migration-audit", destructive: false) {
+            PaletteAction(id: "migration-audit", title: "Check Library", subtitle: "Verify the latest PaperFlow changes", destructive: false) {
                 state.runMigrationAudit()
             },
             PaletteAction(
@@ -46,14 +46,14 @@ struct CommandPaletteView: View {
                 title: "Apply Reviewed Migration",
                 subtitle: state.migrationApplyBlocker.map { "Blocked: \($0)" }
                     ?? "Backup and current dry-run preview verified",
-                destructive: true
+                destructive: false
             ) {
                 state.runApplyMigration()
             },
             PaletteAction(id: "latest-report", title: "Open Latest Report", subtitle: "Open latest apply log or reports folder", destructive: false) {
                 state.openLatestApplyLog()
             },
-            PaletteAction(id: "vault", title: "Open Vault", subtitle: state.vaultPath, destructive: false) {
+            PaletteAction(id: "vault", title: "Open PDF Library", subtitle: "Show PDFs stored on this Mac", destructive: false) {
                 state.openVault()
             },
             PaletteAction(id: "zotero", title: "Open Zotero", subtitle: "Launch Zotero Desktop", destructive: false) {

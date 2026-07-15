@@ -60,21 +60,19 @@ struct ZoteroOrganizeView: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 SectionTitle("Zotero Organize")
-                Text("각 단계는 필요한 입력 파일과 결과 파일을 검사합니다. 이전 단계가 실패하면 종속 단계는 실행되지 않습니다.")
+                Text("위에서 아래 순서로 진행합니다. 완료되지 않은 단계가 있으면 다음 단계는 자동으로 잠깁니다.")
                     .foregroundStyle(PaperFlowTheme.muted)
             }
 
-            SyncWarningBox()
-
             SurfaceSection(
                 title: "Migration workflow",
-                subtitle: "완료된 단계도 입력 파일이 더 새로우면 Update required로 표시됩니다."
+                subtitle: "Library가 바뀌면 필요한 단계만 다시 실행하도록 안내합니다."
             ) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
                     WorkflowStepCard(
                         number: 1,
                         title: "Backup Zotero",
-                        detail: "변경 전 items, collections, tags, memberships snapshot 생성",
+                        detail: "변경 전 library 상태를 안전하게 보관",
                         icon: "externaldrive.badge.timemachine",
                         state: backupState,
                         actionTitle: "Run Backup",
@@ -83,7 +81,7 @@ struct ZoteroOrganizeView: View {
                     WorkflowStepCard(
                         number: 2,
                         title: "Enrich Metadata",
-                        detail: "스캔 JSONL에서 DOI, arXiv ID, metadata quality 보강",
+                        detail: "논문 식별자와 누락된 서지정보 확인",
                         icon: "wand.and.stars",
                         state: enrichState,
                         actionTitle: "Run Enrichment",
@@ -101,7 +99,7 @@ struct ZoteroOrganizeView: View {
                     WorkflowStepCard(
                         number: 4,
                         title: "Plan Migration",
-                        detail: "taxonomy 기준 collection/tag migration plan 생성",
+                        detail: "collection과 tag 변경안을 검토 가능한 형태로 준비",
                         icon: "list.bullet.rectangle",
                         state: planState,
                         actionTitle: "Build Plan",
@@ -109,8 +107,8 @@ struct ZoteroOrganizeView: View {
                     )
                     WorkflowStepCard(
                         number: 5,
-                        title: "Dry Run Migration",
-                        detail: "Zotero write 없이 정확한 API operation preview 생성",
+                        title: "Preview Migration",
+                        detail: "Zotero를 변경하지 않고 최종 결과 미리 확인",
                         icon: "play.circle",
                         state: previewState,
                         actionTitle: "Run Preview",
@@ -129,20 +127,17 @@ struct ZoteroOrganizeView: View {
                         .font(.caption)
                         .foregroundStyle(PaperFlowTheme.rose)
                 }
-                Text("Web API로 적용한 변경은 Zotero Desktop data sync 후 표시될 수 있습니다.")
-                    .font(.callout)
-                    .foregroundStyle(PaperFlowTheme.muted)
                 Label(
-                    "Backup과 현재 plan의 dry-run preview가 확인된 경우에만 실행됩니다. Apply log와 data/backups는 rollback 근거로 보존됩니다.",
+                    "현재 backup과 preview가 확인된 경우에만 실행됩니다. 문제가 생기면 이전 상태로 복구할 수 있습니다.",
                     systemImage: "checkmark.shield"
                 )
                 .font(.caption)
                 .foregroundStyle(PaperFlowTheme.muted)
                 FlowLayout(spacing: 8) {
-                    Button(role: .destructive) {
+                    Button {
                         state.runApplyMigration()
                     } label: {
-                        Label("Apply Reviewed Migration", systemImage: "exclamationmark.triangle")
+                        Label("Apply Reviewed Migration", systemImage: "checkmark.circle")
                     }
                     .disabled(!applyState.allowsExecution)
 

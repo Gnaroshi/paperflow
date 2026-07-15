@@ -7,7 +7,7 @@ struct ExistingAttachmentsView: View {
 
     private var planState: WorkflowStepState {
         guard state.backend.localizeAttachmentCommands else {
-            return .blocked("Backend command missing")
+            return .blocked("This option is unavailable. Open Advanced & Diagnostics in Settings.")
         }
         return state.workflowStepState(
             commandFragment: "zotero plan-localize-attachments",
@@ -17,7 +17,7 @@ struct ExistingAttachmentsView: View {
 
     private var applyState: WorkflowStepState {
         guard state.backend.localizeAttachmentCommands else {
-            return .blocked("Backend command missing")
+            return .blocked("This option is unavailable. Open Advanced & Diagnostics in Settings.")
         }
         guard state.zoteroVerification.writeAccess else {
             return .blocked("Verify Zotero write access in Settings")
@@ -52,30 +52,30 @@ struct ExistingAttachmentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                SectionTitle("Existing Attachments")
-                Text("Stored Zotero PDF를 local vault의 linked PDF로 전환하되 reading work와 원본 attachment를 보존합니다.")
+                SectionTitle("Move Existing PDFs")
+                Text("기존 Zotero PDF를 로컬 library로 옮기면서 메모와 읽기 기록을 보존합니다.")
                     .foregroundStyle(PaperFlowTheme.muted)
             }
 
             SurfaceSection(
-                title: "Localization workflow",
+                title: "Move workflow",
                 subtitle: "Plan → Apply → Verify 순서가 충족되지 않으면 다음 단계는 실행되지 않습니다."
             ) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
-                    WorkflowStepCard(number: 1, title: "Plan Stored PDFs", detail: "stored PDF와 annotation 안전성, vault destination 계획", icon: "map", state: planState, actionTitle: "Build Plan", action: state.runPlanLocalizeAttachments)
-                    WorkflowStepCard(number: 2, title: "Apply Localization", detail: "vault copy와 checksum 확인 후 linked attachment 생성", icon: "arrow.down.doc", state: applyState, actionTitle: "Review & Apply") {
+                    WorkflowStepCard(number: 1, title: "Plan Stored PDFs", detail: "옮길 PDF와 보존할 읽기 기록 확인", icon: "map", state: planState, actionTitle: "Build Plan", action: state.runPlanLocalizeAttachments)
+                    WorkflowStepCard(number: 2, title: "Move PDFs", detail: "PDF를 복사하고 Zotero에서 열 수 있는지 확인", icon: "arrow.down.doc", state: applyState, actionTitle: "Review & Apply") {
                         confirm(.localizeAttachments)
                     }
-                    WorkflowStepCard(number: 3, title: "Verify Attachments", detail: "linked file, checksum, parent item, old stored file 확인", icon: "checkmark.seal", state: verifyState, actionTitle: "Verify", action: state.runVerifyLocalizedAttachments)
+                    WorkflowStepCard(number: 3, title: "Verify Attachments", detail: "새 PDF와 기존 읽기 기록이 정상인지 확인", icon: "checkmark.seal", state: verifyState, actionTitle: "Verify", action: state.runVerifyLocalizedAttachments)
                 }
             }
 
             SurfaceSection(
                 title: "Stored attachment cleanup",
-                subtitle: "검증 성공 후에만 사용합니다. reading work가 있는 attachment는 backend가 거부해야 합니다."
+                subtitle: "검증에 성공한 뒤, 보존할 읽기 기록이 없는 경우에만 사용합니다."
             ) {
                 WorkflowStateBadge(state: cleanupState)
-                WarningBox(text: "Stored attachment 삭제는 verify report가 성공했고 linked file/checksum이 확인된 경우에만 허용됩니다. Note, highlight, underline, annotation이 있으면 자동 삭제하지 않습니다.")
+                WarningBox(text: "새 PDF가 정상적으로 열리는지 확인된 경우에만 기존 복사본을 정리합니다. 메모, 하이라이트 또는 주석이 있으면 삭제하지 않습니다.")
                 TextField("DELETE OLD STORED PDF ATTACHMENTS", text: $cleanupConfirmation)
                     .paperFlowTextInput()
                 Button(role: .destructive) {

@@ -19,7 +19,8 @@ struct MainWindowView: View {
                     SidebarRailOrFullSidebar(
                         selectedSection: $state.selectedSection,
                         isCollapsed: $sidebarCollapsed,
-                        forceRail: geometry.size.width < 900
+                        forceRail: geometry.size.width < 900,
+                        showTechnicalDetails: state.showTechnicalDetails
                     )
                     .frame(width: sidebarWidth)
                     .animation(.easeInOut(duration: 0.16), value: sidebarCollapsed)
@@ -52,11 +53,15 @@ struct MainWindowView: View {
                         Rectangle()
                             .fill(PaperFlowTheme.line)
                             .frame(height: 1)
-                        CommandActivityDock(
-                            runner: state.runner,
-                            expanded: $commandLogExpanded,
-                            maxHeight: max(150, min(260, geometry.size.height * 0.34))
-                        )
+                        if state.showTechnicalDetails {
+                            CommandActivityDock(
+                                runner: state.runner,
+                                expanded: $commandLogExpanded,
+                                maxHeight: max(150, min(260, geometry.size.height * 0.34))
+                            )
+                        } else if state.runner.isRunning {
+                            UserActivityBar(runner: state.runner)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -66,7 +71,7 @@ struct MainWindowView: View {
         .preferredColorScheme(.dark)
         .frame(minWidth: 760, minHeight: 620)
         .onChange(of: state.runner.status) { status in
-            if status == .running {
+            if status == .running && state.showTechnicalDetails {
                 commandLogExpanded = true
             }
             if status != .running {
@@ -119,22 +124,32 @@ struct MainWindowView: View {
                 .fontWeight(.semibold)
             Text(kind.warning)
                 .foregroundStyle(PaperFlowTheme.muted)
-            Text("Type \(kind.requiredText) to continue.")
-                .font(.caption)
-            TextField("Confirmation", text: $confirmationText)
-                .paperFlowTextInput()
+            if kind.requiresTypedConfirmation {
+                Text("Type \(kind.requiredText) to continue.")
+                    .font(.caption)
+                TextField("Confirmation", text: $confirmationText)
+                    .paperFlowTextInput()
+            }
             HStack {
                 Spacer()
                 Button("Cancel") {
                     confirmation = nil
                 }
-                Button(role: .destructive) {
-                    runConfirmed(kind)
-                    confirmation = nil
-                } label: {
-                    Text("Run")
+                if kind.requiresTypedConfirmation {
+                    Button(role: .destructive) {
+                        runConfirmed(kind)
+                        confirmation = nil
+                    } label: {
+                        Text("Delete")
+                    }
+                    .disabled(confirmationText != kind.requiredText)
+                } else {
+                    Button("Apply") {
+                        runConfirmed(kind)
+                        confirmation = nil
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .disabled(confirmationText != kind.requiredText)
             }
         }
         .padding()
@@ -171,6 +186,7 @@ private struct SidebarRailOrFullSidebar: View {
     @Binding var selectedSection: AppSection
     @Binding var isCollapsed: Bool
     let forceRail: Bool
+    let showTechnicalDetails: Bool
 
     private var railOnly: Bool { isCollapsed || forceRail }
 
@@ -189,7 +205,7 @@ private struct SidebarRailOrFullSidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(AppSection.allCases) { section in
+                    ForEach(AppSection.visibleCases(showTechnicalDetails: showTechnicalDetails)) { section in
                         Button {
                             selectedSection = section
                         } label: {
@@ -232,18 +248,19 @@ struct HeaderView: View {
                 Text("PaperFlow")
                     .font(.title3)
                     .fontWeight(.semibold)
-                Text("\(state.statusText) · queued \(state.runner.queuedCount)")
+                Text(state.runner.isRunning ? "Working" : "Ready")
                     .font(.caption)
                     .foregroundStyle(PaperFlowTheme.muted)
             }
             Spacer()
             HStack(spacing: 6) {
                 headerButton("Shelf", icon: "tray.and.arrow.down") { AppServices.shared.toggleShelf() }
-                headerButton("Command", icon: "command") { AppServices.shared.showCommandWindow() }
                 headerButton("Refresh", icon: "arrow.clockwise") { state.refreshStatus() }
-                if !compact {
+                if state.showTechnicalDetails {
+                    headerButton("Command", icon: "command") { AppServices.shared.showCommandWindow() }
+                }
+                if !compact && state.showTechnicalDetails {
                     headerButton("Project", icon: "folder") { state.openProjectFolder() }
-                    headerButton("Reports", icon: "doc.text") { state.openReportsFolder() }
                 }
             }
         }
@@ -386,8 +403,8 @@ struct DropShelfSettingsView: View {
                     isOn: $state.autoHideAfterSuccess
                 )
                 SettingsToggleRow(
-                    "Auto dry-run after drop",
-                    detail: "PDF drop 직후 확인 없이 dry-run 시작",
+                    "Auto preview after drop",
+                    detail: "PDF drop 직후 자동으로 확인",
                     isOn: $state.autoDryRunAfterDrop
                 )
                 ResponsiveSettingRow("Auto-collapse delay", detail: "Drag가 벗어난 뒤 compact 상태로 돌아가는 시간") {
@@ -399,11 +416,13 @@ struct DropShelfSettingsView: View {
                 }
             }
 
-            SurfaceSection(title: "Preview and diagnostics", subtitle: "설정값을 변경하지 않고 PFW와 activation surface를 확인합니다.") {
+            SurfaceSection(title: "Preview", subtitle: "설정값을 변경하지 않고 PFW 표시 상태를 확인합니다.") {
                 SettingsActionBar {
                     Button("Show Drop Shelf") { AppServices.shared.shelfController?.showExpanded() }
                     Button("Hide Drop Shelf") { AppServices.shared.shelfController?.hideShelf() }
-                    Button("Rebuild Hot-Zones") { AppServices.shared.reconfigureHotZones() }
+                    if state.showTechnicalDetails {
+                        Button("Rebuild Hot-Zones") { AppServices.shared.reconfigureHotZones() }
+                    }
                 }
             }
         }
@@ -767,6 +786,24 @@ private struct CommandActivityDock: View {
                     .frame(height: maxHeight)
             }
         }
+        .background(PaperFlowTheme.sidebar)
+    }
+}
+
+private struct UserActivityBar: View {
+    @ObservedObject var runner: CommandRunner
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("PaperFlow is working")
+                .font(.callout.weight(.medium))
+            Spacer()
+            Button("Cancel") { runner.cancel() }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 42)
         .background(PaperFlowTheme.sidebar)
     }
 }
