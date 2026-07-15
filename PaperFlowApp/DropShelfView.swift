@@ -724,6 +724,7 @@ struct DropShelfView: View {
                             .foregroundStyle(PaperFlowTheme.muted)
                         ingestSummaryCollections(row.collections)
                         ingestSummaryTags(row.tags)
+                        ingestReviewGuidance(row)
                         if let operation = row.zoteroOperation {
                             Text("Planned Zotero item: \(operation). \(row.zoteroItemKey ?? "Not created yet - this was a dry run.")")
                                 .font(.caption)
@@ -793,6 +794,38 @@ struct DropShelfView: View {
         }
     }
 
+    @ViewBuilder
+    private func ingestReviewGuidance(_ row: IngestSummaryRow) -> some View {
+        if row.reviewRequired {
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Review required", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PaperFlowTheme.ink)
+                if let reason = row.reviewReason {
+                    Text("Why: \(reason)")
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let nextAction = row.reviewNextAction {
+                    Text("Next: \(nextAction)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(row.reviewSteps.enumerated()), id: \.offset) { index, step in
+                    Text("\(index + 1). \(step)")
+                        .font(.caption2)
+                        .foregroundStyle(PaperFlowTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperFlowCard(tint: PaperFlowTheme.amber, radius: 10)
+        }
+    }
+
     private struct IngestSummaryRow {
         let sourceFile: String
         let title: String
@@ -805,6 +838,10 @@ struct DropShelfView: View {
         let zoteroItemKey: String?
         let zoteroOpenURI: String?
         let finalLinkedPDFPath: String?
+        let reviewRequired: Bool
+        let reviewReason: String?
+        let reviewNextAction: String?
+        let reviewSteps: [String]
         let mode: String
     }
 
@@ -821,6 +858,7 @@ struct DropShelfView: View {
                 return nil
             }
             let zotero = item["zotero"] as? [String: Any]
+            let review = item["review"] as? [String: Any]
             let finalCollections = item["final_collections"] as? [String]
             let finalTags = item["final_tags"] as? [String]
             return IngestSummaryRow(
@@ -835,6 +873,10 @@ struct DropShelfView: View {
                 zoteroItemKey: zotero?["item_key"] as? String,
                 zoteroOpenURI: zotero?["open_uri"] as? String,
                 finalLinkedPDFPath: item["final_linked_pdf_path"] as? String,
+                reviewRequired: review?["required"] as? Bool ?? false,
+                reviewReason: review?["reason"] as? String,
+                reviewNextAction: review?["next_action"] as? String,
+                reviewSteps: review?["steps"] as? [String] ?? [],
                 mode: mode
             )
         }
@@ -882,6 +924,7 @@ struct DropShelfView: View {
             Planned vault path: \(row.targetPath)
             Collections: \(row.collections.joined(separator: ", "))
             Tags: \(row.tags.joined(separator: ", "))
+            \(row.reviewRequired ? "Review reason: \(row.reviewReason ?? "Classification needs review.")\nNext action: \(row.reviewNextAction ?? "Choose the best matching collection.")" : "Review: not required")
             """
         }.joined(separator: "\n\n")
         NSPasteboard.general.clearContents()

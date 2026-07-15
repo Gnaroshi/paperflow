@@ -30,10 +30,10 @@ struct UserGuideView: View {
             )
 
             guideCard(
-                title: "4. 분류 수정",
+                title: "4. Review Queue와 분류 수정",
                 icon: "slider.horizontal.3",
                 text: """
-                Local Folder Import 테이블에서 Correct classification을 누르면 collection/tag를 고칠 수 있습니다. Save as Rule을 누르면 config/user_taxonomy_overrides.yaml에 사용자 규칙으로 저장되고, pending queue가 다시 분류됩니다.
+                보류된 논문의 결과 카드에는 Review Queue에 들어간 이유와 다음 행동이 표시됩니다. Zotero에서 제목과 초록을 확인하고 AI Library/20 Areas 아래의 가장 구체적인 collection을 선택한 뒤 Ambiguous Classification과 review-needed/low-confidence tag를 제거합니다. Local Folder Import의 Correct classification으로 collection/tag를 고치고 Save as Rule을 누르면 config/user_taxonomy_overrides.yaml에 재사용 가능한 사용자 규칙이 저장되며 pending queue가 다시 분류됩니다.
                 """
             )
 
