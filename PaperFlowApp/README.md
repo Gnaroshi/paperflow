@@ -50,6 +50,12 @@ For local Spotlight launch, install the app into `/Applications`:
 ./install_app.sh
 ```
 
+The installer rebuilds from the current committed source, verifies clean build
+provenance and the Developer ID identity, refuses to replace a running installed
+app, keeps a rollback copy during atomic replacement, and confirms the exact
+Spotlight path. Quit PaperFlow normally before installing. `SKIP_BUILD=1` is only
+for a previously verified bundle whose embedded commit matches the checkout.
+
 Then press `Command-Space`, type `PaperFlow`, and press Return.
 
 For GitHub download distribution, upload `dist/PaperFlow.zip` and
